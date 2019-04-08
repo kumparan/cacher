@@ -160,11 +160,11 @@ func TestDecideCacheTTL(t *testing.T) {
 
 	// It should use keeper's default TTL when new cache item didn't specify the TTL
 	i := NewItem(testKey, nil)
-	assert.Equal(t, k.defaultTTL.Seconds(), k.decideCacheTTL(i))
+	assert.Equal(t, int64(k.defaultTTL.Seconds()), k.decideCacheTTL(i))
 
 	// It should use specified TTL when new cache item specify the TTL
 	i2 := NewItemWithCustomTTL(testKey, nil, 10*time.Second)
-	assert.Equal(t, i2.GetTTLFloat64(), k.decideCacheTTL(i))
+	assert.Equal(t, i2.GetTTLInt64(), k.decideCacheTTL(i))
 }
 
 func TestIncreaseCachedValueByOne(t *testing.T) {
