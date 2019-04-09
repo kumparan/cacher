@@ -251,12 +251,12 @@ func (k *keeper) AcquireLock(key string) (*redsync.Mutex, error) {
 	return m, m.Lock()
 }
 
-func (k *keeper) decideCacheTTL(c Item) float64 {
-	if c.GetTTLFloat64() > 0 {
-		return c.GetTTLFloat64()
+func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
+	if ttl = c.GetTTLInt64(); ttl > 0 {
+		return
 	}
 
-	return k.defaultTTL.Seconds()
+	return int64(k.defaultTTL.Seconds())
 }
 
 func (k *keeper) getCachedItem(key string) (value interface{}, err error) {

@@ -7,7 +7,7 @@ import (
 type (
 	// Item :nodoc:
 	Item interface {
-		GetTTLFloat64() float64
+		GetTTLInt64() int64
 		GetKey() string
 		GetValue() interface{}
 	}
@@ -36,9 +36,9 @@ func NewItemWithCustomTTL(key string, value interface{}, customTTL time.Duration
 	}
 }
 
-// GetTTLFloat64 :nodoc:
-func (i *item) GetTTLFloat64() float64 {
-	return i.ttl.Seconds()
+// GetTTLInt64 :nodoc:
+func (i *item) GetTTLInt64() int64 {
+	return int64(i.ttl.Seconds())
 }
 
 // GetKey :nodoc:
