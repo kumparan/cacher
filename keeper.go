@@ -262,15 +262,31 @@ func (k *keeper) DeleteByKeys(keys []string) error {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	ifKeys := keys.([]interface{})
+	redisKeys := []interface{}{}
+	for _, key := range keys {
+		redisKeys = append(redisKeys, key)
+	}
 
-	_, err := client.Do("DEL", keys.([]interface{})...)
+	_, err := client.Do("DEL", redisKeys...)
 	return err
 }
 
 // StoreMultiWithoutBlocking Store multiple items
 func (k *keeper) StoreMultiWithoutBlocking(items []Item) error {
-	return nil
+	if k.disableCaching {
+		return nil
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	client.Send("MULTI")
+	for _, item := range items {
+		client.Send("SETEX", item.GetKey(), k.decideCacheTTL(item), item.GetValue())
+	}
+
+	_, err := client.Do("EXEC")
+	return err
 }
 
 func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
