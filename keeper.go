@@ -27,7 +27,9 @@ type (
 		GetOrSet(string, CacheGeneratorFn, time.Duration) (interface{}, error)
 		Store(*redsync.Mutex, Item) error
 		StoreWithoutBlocking(Item) error
+		StoreMultiWithoutBlocking([]Item) error
 		Purge(string) error
+		DeleteByKeys([]string) error
 		IncreaseCachedValueByOne(key string) error
 
 		AcquireLock(string) (*redsync.Mutex, error)
@@ -249,6 +251,42 @@ func (k *keeper) AcquireLock(key string) (*redsync.Mutex, error) {
 		redsync.SetTries(k.lockTries))
 
 	return m, m.Lock()
+}
+
+// DeleteByKeys Delete by multiple keys
+func (k *keeper) DeleteByKeys(keys []string) error {
+	if k.disableCaching {
+		return nil
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	redisKeys := []interface{}{}
+	for _, key := range keys {
+		redisKeys = append(redisKeys, key)
+	}
+
+	_, err := client.Do("DEL", redisKeys...)
+	return err
+}
+
+// StoreMultiWithoutBlocking Store multiple items
+func (k *keeper) StoreMultiWithoutBlocking(items []Item) error {
+	if k.disableCaching {
+		return nil
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	client.Send("MULTI")
+	for _, item := range items {
+		client.Send("SETEX", item.GetKey(), k.decideCacheTTL(item), item.GetValue())
+	}
+
+	_, err := client.Do("EXEC")
+	return err
 }
 
 func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
