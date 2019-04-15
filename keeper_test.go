@@ -288,3 +288,79 @@ func TestStoreMultiWithoutBlocking(t *testing.T) {
 		assert.EqualValues(t, value, res)
 	}
 }
+
+func TestStoreMultiPersist(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	err = k.StoreMultiPersist([]Item{
+		NewItem("abc", "hehehe"),
+		NewItem("def", "hohoho"),
+	})
+
+	assert.True(t, m.Exists("abc"))
+	assert.True(t, m.Exists("def"))
+
+	assert.EqualValues(t, 0, m.TTL("abc"))
+	assert.EqualValues(t, 0, m.TTL("asdfasd"))
+}
+
+func TestExpire(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	key := "combro"
+
+	m.Set(key, "enaq scully")
+	m.SetTTL(key, 60*time.Second)
+
+	newTTL := 66 * time.Hour
+	k.Expire(key, newTTL)
+
+	assert.EqualValues(t, newTTL, m.TTL(key))
+}
+
+func TestExpireMulti(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	key1 := "combro"
+	key2 := "kuelapis"
+
+	m.Set(key1, "enaq scully")
+	m.SetTTL(key1, 5*time.Second)
+	m.Set(key2, "mantul over 9000")
+	m.SetTTL(key2, 9*time.Second)
+
+	newTTL1 := 66 * time.Hour
+	newTTL2 := 77 * time.Hour
+
+	k.ExpireMulti(map[string]time.Duration{
+		key1: newTTL1,
+		key2: newTTL2,
+	})
+
+	assert.EqualValues(t, newTTL1, m.TTL(key1))
+	assert.EqualValues(t, newTTL2, m.TTL(key2))
+}

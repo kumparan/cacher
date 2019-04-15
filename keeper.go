@@ -28,6 +28,9 @@ type (
 		Store(*redsync.Mutex, Item) error
 		StoreWithoutBlocking(Item) error
 		StoreMultiWithoutBlocking([]Item) error
+		StoreMultiPersist([]Item) error
+		Expire(string, time.Duration) error
+		ExpireMulti(map[string]time.Duration) error
 		Purge(string) error
 		DeleteByKeys([]string) error
 		IncreaseCachedValueByOne(key string) error
@@ -283,6 +286,56 @@ func (k *keeper) StoreMultiWithoutBlocking(items []Item) error {
 	client.Send("MULTI")
 	for _, item := range items {
 		client.Send("SETEX", item.GetKey(), k.decideCacheTTL(item), item.GetValue())
+	}
+
+	_, err := client.Do("EXEC")
+	return err
+}
+
+// StoreMultiPersist Store multiple items with persistence
+func (k *keeper) StoreMultiPersist(items []Item) error {
+	if k.disableCaching {
+		return nil
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	client.Send("MULTI")
+	for _, item := range items {
+		client.Send("SET", item.GetKey(), item.GetValue())
+		client.Send("PERSIST", item.GetKey())
+	}
+
+	_, err := client.Do("EXEC")
+	return err
+}
+
+// Expire Set expire a key
+func (k *keeper) Expire(key string, duration time.Duration) (err error) {
+	if k.disableCaching {
+		return nil
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	_, err = client.Do("EXPIRE", key, int64(duration.Seconds()))
+	return
+}
+
+// ExpireMulti Set expire multiple
+func (k *keeper) ExpireMulti(items map[string]time.Duration) error {
+	if k.disableCaching {
+		return nil
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	client.Send("MULTI")
+	for k, duration := range items {
+		client.Send("EXPIRE", k, int64(duration.Seconds()))
 	}
 
 	_, err := client.Do("EXEC")
