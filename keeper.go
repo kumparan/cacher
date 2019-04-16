@@ -23,6 +23,7 @@ type (
 
 	// Keeper responsible for managing cache
 	Keeper interface {
+		Get(string) (interface{}, error)
 		GetOrLock(string) (interface{}, *redsync.Mutex, error)
 		GetOrSet(string, CacheGeneratorFn, time.Duration) (interface{}, error)
 		Store(*redsync.Mutex, Item) error
@@ -66,6 +67,20 @@ func NewKeeper() Keeper {
 		waitTime:       defaultWaitTime,
 		disableCaching: false,
 	}
+}
+
+// Get :nodoc:
+func (k *keeper) Get(key string) (cachedItem interface{}, err error) {
+	if k.disableCaching {
+		return
+	}
+
+	cachedItem, err = k.getCachedItem(key)
+	if err != nil && err != redigo.ErrNil || cachedItem != nil {
+		return
+	}
+
+	return nil, nil
 }
 
 // GetOrLock :nodoc:
