@@ -17,6 +17,16 @@ type (
 		value interface{}
 		ttl   time.Duration
 	}
+
+	List interface {
+		GetListName() string
+		GetValue() interface{}
+	}
+
+	list struct {
+		listName string
+		value    interface{}
+	}
 )
 
 // NewItem :nodoc:
@@ -48,5 +58,23 @@ func (i *item) GetKey() string {
 
 // GetValue :nodoc:
 func (i *item) GetValue() interface{} {
+	return i.value
+}
+
+// NewList :nodoc:
+func NewList(listName string, value interface{}) List {
+	return &list{
+		listName: listName,
+		value:    value,
+	}
+}
+
+// GetKey :nodoc:
+func (i *list) GetListName() string {
+	return i.listName
+}
+
+// GetValue :nodoc:
+func (i *list) GetValue() interface{} {
 	return i.value
 }

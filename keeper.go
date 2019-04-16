@@ -44,6 +44,12 @@ type (
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
 		SetDisableCaching(bool)
+
+		//list
+		StoreList(mutex *redsync.Mutex, c List) error
+		GetOrLockList(string) (interface{}, *redsync.Mutex, error)
+		GetListLength(listName string) (value int64, err error)
+		GetFirstListElement(listName string) (value interface{}, err error)
 	}
 
 	keeper struct {
@@ -382,4 +388,106 @@ func (k *keeper) isLocked(key string) bool {
 	}
 
 	return true
+}
+
+// StoreList :nodoc:
+func (k *keeper) StoreList(mutex *redsync.Mutex, c List) error {
+	if k.disableCaching {
+		return nil
+	}
+	defer mutex.Unlock()
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	_, err := client.Do("RPUSH", c.GetListName(), c.GetValue())
+
+	return err
+}
+
+// GetOrLockList :nodoc:
+func (k *keeper) GetOrLockList(key string) (cachedList interface{}, mutex *redsync.Mutex, err error) {
+	if k.disableCaching {
+		return
+	}
+
+	cachedList, err = k.getCachedList(key)
+	if err != nil && err != redigo.ErrNil || cachedList != nil {
+		return
+	}
+
+	mutex, err = k.AcquireLock(key)
+	if err == nil {
+		return
+	}
+
+	start := time.Now()
+	for {
+		b := &backoff.Backoff{
+			Min:    20 * time.Millisecond,
+			Max:    200 * time.Millisecond,
+			Jitter: true,
+		}
+
+		if !k.isLocked(key) {
+			cachedList, err = k.getCachedList(key)
+			if err != nil && err != redigo.ErrNil || cachedList != nil {
+				return
+			}
+			return nil, nil, nil
+		}
+
+		elapsed := time.Since(start)
+		if elapsed >= k.waitTime {
+			break
+		}
+
+		time.Sleep(b.Duration())
+	}
+
+	return nil, nil, errors.New("wait too long")
+}
+
+func (k *keeper) GetListLength(listName string) (value int64, err error) {
+	client := k.connPool.Get()
+	defer client.Close()
+
+	val, err := client.Do("LLEN", listName)
+	value = val.(int64)
+
+	return
+}
+
+func (k *keeper) GetFirstListElement(listName string) (value interface{}, err error) {
+	client := k.connPool.Get()
+	defer client.Close()
+
+	llen, err := k.GetListLength(listName)
+	if err != nil {
+		return
+	}
+
+	if llen == 0 {
+		return
+	}
+
+	value, err = client.Do("LPOP", listName)
+	return
+}
+
+func (k *keeper) getCachedList(listName string) (value interface{}, err error) {
+	client := k.connPool.Get()
+	defer client.Close()
+
+	llen, err := k.GetListLength(listName)
+	if err != nil {
+		return
+	}
+
+	if llen == 0 {
+		return
+	}
+
+	value, err = client.Do("LRANGE", listName, 0, llen-1)
+	return
 }
