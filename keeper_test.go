@@ -30,6 +30,36 @@ func newRedisConn(url string) *redigo.Pool {
 	}
 }
 
+func TestGet(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+	k.SetWaitTime(1 * time.Second) // override wait time to 1 second
+
+	testKey := "test-key"
+
+	t.Run("Not Exist", func(t *testing.T) {
+		assert.False(t, m.Exists(testKey))
+		result, err := k.Get(testKey)
+		assert.NoError(t, err)
+		assert.Nil(t, result)
+	})
+
+	t.Run("Exist", func(t *testing.T) {
+		val := "something-something-here"
+		m.Set(testKey, val)
+		result, err := k.Get(testKey)
+		assert.NoError(t, err)
+		assert.EqualValues(t, result, val)
+	})
+}
+
 func TestGetLockStore(t *testing.T) {
 	// Initialize new cache keeper
 	k := NewKeeper()
