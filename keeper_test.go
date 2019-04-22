@@ -31,6 +31,35 @@ func newRedisConn(url string) *redigo.Pool {
 	}
 }
 
+func TestCheckKeyExist(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+	k.SetWaitTime(1 * time.Second) // override wait time to 1 second
+
+	testKey := "test-key"
+
+	t.Run("Not Exist", func(t *testing.T) {
+		result, err := k.CheckKeyExist(testKey)
+		assert.NoError(t, err)
+		assert.EqualValues(t, result, false)
+	})
+
+	t.Run("Exist", func(t *testing.T) {
+		val := "something-something-here"
+		m.Set(testKey, val)
+		result, err := k.CheckKeyExist(testKey)
+		assert.NoError(t, err)
+		assert.EqualValues(t, result, true)
+	})
+}
+
 func TestGet(t *testing.T) {
 	// Initialize new cache keeper
 	k := NewKeeper()
@@ -396,7 +425,7 @@ func TestExpireMulti(t *testing.T) {
 	assert.EqualValues(t, newTTL2, m.TTL(key2))
 }
 
-func TestGetLockStoreList(t *testing.T) {
+func TestGetLockStoreRightLeftList(t *testing.T) {
 	// Initialize new cache keeper
 	k := NewKeeper()
 
@@ -427,12 +456,12 @@ func TestGetLockStoreList(t *testing.T) {
 	// It should get response when mutex lock unlocked and cache list ready
 	list := NewList(name, "test-response")
 	multiList = append(multiList, "test-response")
-	err = k.StoreList(mu, list)
+	err = k.StoreLeftList(mu, list)
 	assert.NoError(t, err)
 
 	list = NewList(name, "test-response-2")
 	multiList = append(multiList, "test-response-2")
-	err = k.StoreList(mu, list)
+	err = k.StoreRightList(mu, list)
 	assert.NoError(t, err)
 
 	res2, mu2, err2 = k.GetOrLockList(name, 2, 1)
@@ -443,7 +472,7 @@ func TestGetLockStoreList(t *testing.T) {
 
 }
 
-func TestGetFirstListElement(t *testing.T) {
+func TestGetAndRemoveFirstAndLastListElement(t *testing.T) {
 	// Initialize new cache keeper
 	k := NewKeeper()
 
@@ -465,17 +494,26 @@ func TestGetFirstListElement(t *testing.T) {
 
 	// It should get response when mutex lock unlocked and cache list ready
 	list := NewList(name, "test-response")
-	err = k.StoreList(mu, list)
+	err = k.StoreRightList(mu, list)
 	assert.NoError(t, err)
 
 	list = NewList(name, "test-response-2")
-	err = k.StoreList(mu, list)
+	err = k.StoreRightList(mu, list)
 	assert.NoError(t, err)
 
-	res3, err3 := k.GetFirstListElement(name)
+	list = NewList(name, "test-response-3")
+	err = k.StoreRightList(mu, list)
+	assert.NoError(t, err)
+
+	res3, err3 := k.GetAndRemoveFirstListElement(name)
 	firstElement, err := redis.String(res3, nil)
 	assert.EqualValues(t, firstElement, "test-response")
 	assert.NoError(t, err3)
+
+	res4, err4 := k.GetAndRemoveLastListElement(name)
+	lastElement, err := redis.String(res4, nil)
+	assert.EqualValues(t, lastElement, "test-response-3")
+	assert.NoError(t, err4)
 
 }
 func TestGetListLength(t *testing.T) {
@@ -500,11 +538,11 @@ func TestGetListLength(t *testing.T) {
 
 	// It should get response when mutex lock unlocked and cache list ready
 	list := NewList(name, "test-response")
-	err = k.StoreList(mu, list)
+	err = k.StoreRightList(mu, list)
 	assert.NoError(t, err)
 
 	list = NewList(name, "test-response-2")
-	err = k.StoreList(mu, list)
+	err = k.StoreRightList(mu, list)
 	assert.NoError(t, err)
 
 	res3, err3 := k.GetListLength(name)

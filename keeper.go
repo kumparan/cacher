@@ -46,11 +46,15 @@ type (
 		SetWaitTime(time.Duration)
 		SetDisableCaching(bool)
 
+		CheckKeyExist(string) (bool, error)
+
 		//list
-		StoreList(mutex *redsync.Mutex, c List) error
+		StoreRightList(mutex *redsync.Mutex, c List) error
+		StoreLeftList(mutex *redsync.Mutex, c List) error
 		GetOrLockList(string, int64, int64) (interface{}, *redsync.Mutex, error)
 		GetListLength(name string) (value int64, err error)
-		GetFirstListElement(name string) (value interface{}, err error)
+		GetAndRemoveFirstListElement(name string) (value interface{}, err error)
+		GetAndRemoveLastListElement(name string) (value interface{}, err error)
 	}
 
 	keeper struct {
@@ -391,8 +395,24 @@ func (k *keeper) isLocked(key string) bool {
 	return true
 }
 
-// StoreList :nodoc:
-func (k *keeper) StoreList(mutex *redsync.Mutex, c List) error {
+// CheckKeyExist :nodoc:
+func (k *keeper) CheckKeyExist(key string) (value bool, err error) {
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	val, err := client.Do("EXISTS", key)
+
+	value = false
+	if val.(int64) > 0 {
+		value = true
+	}
+
+	return
+}
+
+// StoreRightList :nodoc:
+func (k *keeper) StoreRightList(mutex *redsync.Mutex, c List) error {
 	if k.disableCaching {
 		return nil
 	}
@@ -402,6 +422,21 @@ func (k *keeper) StoreList(mutex *redsync.Mutex, c List) error {
 	defer client.Close()
 
 	_, err := client.Do("RPUSH", c.Getname(), c.GetValue())
+
+	return err
+}
+
+// StoreLeftList :nodoc:
+func (k *keeper) StoreLeftList(mutex *redsync.Mutex, c List) error {
+	if k.disableCaching {
+		return nil
+	}
+	defer mutex.Unlock()
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	_, err := client.Do("LPUSH", c.Getname(), c.GetValue())
 
 	return err
 }
@@ -461,7 +496,7 @@ func (k *keeper) GetListLength(name string) (value int64, err error) {
 	return
 }
 
-func (k *keeper) GetFirstListElement(name string) (value interface{}, err error) {
+func (k *keeper) GetAndRemoveFirstListElement(name string) (value interface{}, err error) {
 	client := k.connPool.Get()
 	defer client.Close()
 
@@ -475,6 +510,23 @@ func (k *keeper) GetFirstListElement(name string) (value interface{}, err error)
 	}
 
 	value, err = client.Do("LPOP", name)
+	return
+}
+
+func (k *keeper) GetAndRemoveLastListElement(name string) (value interface{}, err error) {
+	client := k.connPool.Get()
+	defer client.Close()
+
+	llen, err := k.GetListLength(name)
+	if err != nil {
+		return
+	}
+
+	if llen == 0 {
+		return
+	}
+
+	value, err = client.Do("RPOP", name)
 	return
 }
 
