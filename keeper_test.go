@@ -408,16 +408,16 @@ func TestGetLockStoreList(t *testing.T) {
 	k.SetLockConnectionPool(r)
 	k.SetWaitTime(1 * time.Second) // override wait time to 1 second
 
-	listName := "list-name"
+	name := "list-name"
 
 	// It should return mutex when no other process is locking the process
-	res, mu, err := k.GetOrLockList(listName)
+	res, mu, err := k.GetOrLockList(name, 1, 1)
 	assert.Nil(t, res)
 	assert.NoError(t, err)
 	assert.NotNil(t, mu)
 
 	// It should wait, and return an error while waiting for cached list ready
-	res2, mu2, err2 := k.GetOrLockList(listName)
+	res2, mu2, err2 := k.GetOrLockList(name, 1, 1)
 	assert.Nil(t, res2)
 	assert.Nil(t, mu2)
 	assert.Error(t, err2)
@@ -425,17 +425,17 @@ func TestGetLockStoreList(t *testing.T) {
 	var multiList []string
 
 	// It should get response when mutex lock unlocked and cache list ready
-	list := NewList(listName, "test-response")
+	list := NewList(name, "test-response")
 	multiList = append(multiList, "test-response")
 	err = k.StoreList(mu, list)
 	assert.NoError(t, err)
 
-	list = NewList(listName, "test-response-2")
+	list = NewList(name, "test-response-2")
 	multiList = append(multiList, "test-response-2")
 	err = k.StoreList(mu, list)
 	assert.NoError(t, err)
 
-	res2, mu2, err2 = k.GetOrLockList(listName)
+	res2, mu2, err2 = k.GetOrLockList(name, 2, 1)
 	resultList, err := redis.Strings(res2, nil)
 	assert.EqualValues(t, multiList, resultList)
 	assert.Nil(t, mu2)
@@ -455,24 +455,24 @@ func TestGetFirstListElement(t *testing.T) {
 	k.SetLockConnectionPool(r)
 	k.SetWaitTime(1 * time.Second) // override wait time to 1 second
 
-	listName := "list-name"
+	name := "list-name"
 
 	// It should return mutex when no other process is locking the process
-	res, mu, err := k.GetOrLockList(listName)
+	res, mu, err := k.GetOrLockList(name, 1, 1)
 	assert.Nil(t, res)
 	assert.NoError(t, err)
 	assert.NotNil(t, mu)
 
 	// It should get response when mutex lock unlocked and cache list ready
-	list := NewList(listName, "test-response")
+	list := NewList(name, "test-response")
 	err = k.StoreList(mu, list)
 	assert.NoError(t, err)
 
-	list = NewList(listName, "test-response-2")
+	list = NewList(name, "test-response-2")
 	err = k.StoreList(mu, list)
 	assert.NoError(t, err)
 
-	res3, err3 := k.GetFirstListElement(listName)
+	res3, err3 := k.GetFirstListElement(name)
 	firstElement, err := redis.String(res3, nil)
 	assert.EqualValues(t, firstElement, "test-response")
 	assert.NoError(t, err3)
@@ -490,24 +490,24 @@ func TestGetListLength(t *testing.T) {
 	k.SetLockConnectionPool(r)
 	k.SetWaitTime(1 * time.Second) // override wait time to 1 second
 
-	listName := "list-name"
+	name := "list-name"
 
 	// It should return mutex when no other process is locking the process
-	res, mu, err := k.GetOrLockList(listName)
+	res, mu, err := k.GetOrLockList(name, 1, 1)
 	assert.Nil(t, res)
 	assert.NoError(t, err)
 	assert.NotNil(t, mu)
 
 	// It should get response when mutex lock unlocked and cache list ready
-	list := NewList(listName, "test-response")
+	list := NewList(name, "test-response")
 	err = k.StoreList(mu, list)
 	assert.NoError(t, err)
 
-	list = NewList(listName, "test-response-2")
+	list = NewList(name, "test-response-2")
 	err = k.StoreList(mu, list)
 	assert.NoError(t, err)
 
-	res3, err3 := k.GetListLength(listName)
+	res3, err3 := k.GetListLength(name)
 	assert.EqualValues(t, res3, 2)
 	assert.NoError(t, err3)
 

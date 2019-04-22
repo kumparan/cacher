@@ -7,6 +7,7 @@ import (
 	"github.com/go-redsync/redsync"
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
+	"github.com/kumparan/go-lib/utils"
 )
 
 const (
@@ -47,9 +48,9 @@ type (
 
 		//list
 		StoreList(mutex *redsync.Mutex, c List) error
-		GetOrLockList(string) (interface{}, *redsync.Mutex, error)
-		GetListLength(listName string) (value int64, err error)
-		GetFirstListElement(listName string) (value interface{}, err error)
+		GetOrLockList(string, int64, int64) (interface{}, *redsync.Mutex, error)
+		GetListLength(name string) (value int64, err error)
+		GetFirstListElement(name string) (value interface{}, err error)
 	}
 
 	keeper struct {
@@ -400,18 +401,20 @@ func (k *keeper) StoreList(mutex *redsync.Mutex, c List) error {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	_, err := client.Do("RPUSH", c.GetListName(), c.GetValue())
+	_, err := client.Do("RPUSH", c.Getname(), c.GetValue())
 
 	return err
 }
 
 // GetOrLockList :nodoc:
-func (k *keeper) GetOrLockList(key string) (cachedList interface{}, mutex *redsync.Mutex, err error) {
+func (k *keeper) GetOrLockList(key string, size int64, page int64) (cachedList interface{}, mutex *redsync.Mutex, err error) {
+	offset := utils.Offset(page, size)
+
 	if k.disableCaching {
 		return
 	}
 
-	cachedList, err = k.getCachedList(key)
+	cachedList, err = k.getCachedList(key, offset, size)
 	if err != nil && err != redigo.ErrNil || cachedList != nil {
 		return
 	}
@@ -430,7 +433,7 @@ func (k *keeper) GetOrLockList(key string) (cachedList interface{}, mutex *redsy
 		}
 
 		if !k.isLocked(key) {
-			cachedList, err = k.getCachedList(key)
+			cachedList, err = k.getCachedList(key, offset, size)
 			if err != nil && err != redigo.ErrNil || cachedList != nil {
 				return
 			}
@@ -448,21 +451,21 @@ func (k *keeper) GetOrLockList(key string) (cachedList interface{}, mutex *redsy
 	return nil, nil, errors.New("wait too long")
 }
 
-func (k *keeper) GetListLength(listName string) (value int64, err error) {
+func (k *keeper) GetListLength(name string) (value int64, err error) {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	val, err := client.Do("LLEN", listName)
+	val, err := client.Do("LLEN", name)
 	value = val.(int64)
 
 	return
 }
 
-func (k *keeper) GetFirstListElement(listName string) (value interface{}, err error) {
+func (k *keeper) GetFirstListElement(name string) (value interface{}, err error) {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	llen, err := k.GetListLength(listName)
+	llen, err := k.GetListLength(name)
 	if err != nil {
 		return
 	}
@@ -471,15 +474,15 @@ func (k *keeper) GetFirstListElement(listName string) (value interface{}, err er
 		return
 	}
 
-	value, err = client.Do("LPOP", listName)
+	value, err = client.Do("LPOP", name)
 	return
 }
 
-func (k *keeper) getCachedList(listName string) (value interface{}, err error) {
+func (k *keeper) getCachedList(name string, offset int64, size int64) (value interface{}, err error) {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	llen, err := k.GetListLength(listName)
+	llen, err := k.GetListLength(name)
 	if err != nil {
 		return
 	}
@@ -488,6 +491,8 @@ func (k *keeper) getCachedList(listName string) (value interface{}, err error) {
 		return
 	}
 
-	value, err = client.Do("LRANGE", listName, 0, llen-1)
+	end := offset + size
+
+	value, err = client.Do("LRANGE", name, offset, end)
 	return
 }

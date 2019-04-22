@@ -19,13 +19,13 @@ type (
 	}
 
 	List interface {
-		GetListName() string
+		Getname() string
 		GetValue() interface{}
 	}
 
 	list struct {
-		listName string
-		value    interface{}
+		name  string
+		value interface{}
 	}
 )
 
@@ -62,16 +62,16 @@ func (i *item) GetValue() interface{} {
 }
 
 // NewList :nodoc:
-func NewList(listName string, value interface{}) List {
+func NewList(name string, value interface{}) List {
 	return &list{
-		listName: listName,
-		value:    value,
+		name:  name,
+		value: value,
 	}
 }
 
 // GetKey :nodoc:
-func (i *list) GetListName() string {
-	return i.listName
+func (i *list) Getname() string {
+	return i.name
 }
 
 // GetValue :nodoc:
