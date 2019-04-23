@@ -190,18 +190,19 @@ func (k *keeper) Purge(matchString string) error {
 	defer client.Close()
 
 	var cursor interface{}
-
+	var stop []uint8
 	cursor = "0"
 	for {
 		res, err := redigo.Values(client.Do("SCAN", cursor, "MATCH", matchString))
 		if err != nil {
 			return err
 		}
-
+		stop = res[0].([]uint8)
 		if foundKeys, ok := res[1].([]interface{}); ok {
 			client.Send("DEL", foundKeys...)
 
-			if len(foundKeys) == 0 {
+			// ascii for '0' is 48
+			if stop[0] == 48 {
 				break
 			}
 		}
