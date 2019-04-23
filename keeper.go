@@ -211,7 +211,6 @@ func (k *keeper) Purge(matchString string) error {
 
 		cursor = res[0]
 	}
-
 	return nil
 }
 
