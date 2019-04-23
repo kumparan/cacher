@@ -49,12 +49,13 @@ type (
 		CheckKeyExist(string) (bool, error)
 
 		//list
-		StoreRightList(mutex *redsync.Mutex, c List) error
-		StoreLeftList(mutex *redsync.Mutex, c List) error
-		GetOrLockList(string, int64, int64) (interface{}, *redsync.Mutex, error)
-		GetListLength(name string) (value int64, err error)
-		GetAndRemoveFirstListElement(name string) (value interface{}, err error)
-		GetAndRemoveLastListElement(name string) (value interface{}, err error)
+		StoreRightList(string, interface{}) error
+		StoreLeftList(string, interface{}) error
+		// GetOrLockList(string, int64, int64) (interface{}, *redsync.Mutex, error)
+		GetList(string, int64, int64) (interface{}, error)
+		GetListLength(string) (int64, error)
+		GetAndRemoveFirstListElement(string) (interface{}, error)
+		GetAndRemoveLastListElement(string) (interface{}, error)
 	}
 
 	keeper struct {
@@ -412,78 +413,23 @@ func (k *keeper) CheckKeyExist(key string) (value bool, err error) {
 }
 
 // StoreRightList :nodoc:
-func (k *keeper) StoreRightList(mutex *redsync.Mutex, c List) error {
-	if k.disableCaching {
-		return nil
-	}
-	defer mutex.Unlock()
-
+func (k *keeper) StoreRightList(name string, value interface{}) error {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	_, err := client.Do("RPUSH", c.Getname(), c.GetValue())
+	_, err := client.Do("RPUSH", name, value)
 
 	return err
 }
 
 // StoreLeftList :nodoc:
-func (k *keeper) StoreLeftList(mutex *redsync.Mutex, c List) error {
-	if k.disableCaching {
-		return nil
-	}
-	defer mutex.Unlock()
-
+func (k *keeper) StoreLeftList(name string, value interface{}) error {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	_, err := client.Do("LPUSH", c.Getname(), c.GetValue())
+	_, err := client.Do("LPUSH", name, value)
 
 	return err
-}
-
-// GetOrLockList :nodoc:
-func (k *keeper) GetOrLockList(key string, size int64, page int64) (cachedList interface{}, mutex *redsync.Mutex, err error) {
-	offset := utils.Offset(page, size)
-
-	if k.disableCaching {
-		return
-	}
-
-	cachedList, err = k.getCachedList(key, offset, size)
-	if err != nil && err != redigo.ErrNil || cachedList != nil {
-		return
-	}
-
-	mutex, err = k.AcquireLock(key)
-	if err == nil {
-		return
-	}
-
-	start := time.Now()
-	for {
-		b := &backoff.Backoff{
-			Min:    20 * time.Millisecond,
-			Max:    200 * time.Millisecond,
-			Jitter: true,
-		}
-
-		if !k.isLocked(key) {
-			cachedList, err = k.getCachedList(key, offset, size)
-			if err != nil && err != redigo.ErrNil || cachedList != nil {
-				return
-			}
-			return nil, nil, nil
-		}
-
-		elapsed := time.Since(start)
-		if elapsed >= k.waitTime {
-			break
-		}
-
-		time.Sleep(b.Duration())
-	}
-
-	return nil, nil, errors.New("wait too long")
 }
 
 func (k *keeper) GetListLength(name string) (value int64, err error) {
@@ -530,7 +476,9 @@ func (k *keeper) GetAndRemoveLastListElement(name string) (value interface{}, er
 	return
 }
 
-func (k *keeper) getCachedList(name string, offset int64, size int64) (value interface{}, err error) {
+func (k *keeper) GetList(name string, size int64, page int64) (value interface{}, err error) {
+	offset := utils.Offset(page, size)
+
 	client := k.connPool.Get()
 	defer client.Close()
 
