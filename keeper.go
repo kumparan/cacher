@@ -51,7 +51,6 @@ type (
 		//list
 		StoreRightList(string, interface{}) error
 		StoreLeftList(string, interface{}) error
-		// GetOrLockList(string, int64, int64) (interface{}, *redsync.Mutex, error)
 		GetList(string, int64, int64) (interface{}, error)
 		GetListLength(string) (int64, error)
 		GetAndRemoveFirstListElement(string) (interface{}, error)
