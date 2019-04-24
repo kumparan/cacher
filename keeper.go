@@ -7,6 +7,7 @@ import (
 	"github.com/go-redsync/redsync"
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
+	"github.com/kumparan/go-lib/utils"
 )
 
 const (
@@ -44,6 +45,16 @@ type (
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
 		SetDisableCaching(bool)
+
+		CheckKeyExist(string) (bool, error)
+
+		//list
+		StoreRightList(string, interface{}) error
+		StoreLeftList(string, interface{}) error
+		GetList(string, int64, int64) (interface{}, error)
+		GetListLength(string) (int64, error)
+		GetAndRemoveFirstListElement(string) (interface{}, error)
+		GetAndRemoveLastListElement(string) (interface{}, error)
 	}
 
 	keeper struct {
@@ -384,4 +395,105 @@ func (k *keeper) isLocked(key string) bool {
 	}
 
 	return true
+}
+
+// CheckKeyExist :nodoc:
+func (k *keeper) CheckKeyExist(key string) (value bool, err error) {
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	val, err := client.Do("EXISTS", key)
+
+	value = false
+	if val.(int64) > 0 {
+		value = true
+	}
+
+	return
+}
+
+// StoreRightList :nodoc:
+func (k *keeper) StoreRightList(name string, value interface{}) error {
+	client := k.connPool.Get()
+	defer client.Close()
+
+	_, err := client.Do("RPUSH", name, value)
+
+	return err
+}
+
+// StoreLeftList :nodoc:
+func (k *keeper) StoreLeftList(name string, value interface{}) error {
+	client := k.connPool.Get()
+	defer client.Close()
+
+	_, err := client.Do("LPUSH", name, value)
+
+	return err
+}
+
+func (k *keeper) GetListLength(name string) (value int64, err error) {
+	client := k.connPool.Get()
+	defer client.Close()
+
+	val, err := client.Do("LLEN", name)
+	value = val.(int64)
+
+	return
+}
+
+func (k *keeper) GetAndRemoveFirstListElement(name string) (value interface{}, err error) {
+	client := k.connPool.Get()
+	defer client.Close()
+
+	llen, err := k.GetListLength(name)
+	if err != nil {
+		return
+	}
+
+	if llen == 0 {
+		return
+	}
+
+	value, err = client.Do("LPOP", name)
+	return
+}
+
+func (k *keeper) GetAndRemoveLastListElement(name string) (value interface{}, err error) {
+	client := k.connPool.Get()
+	defer client.Close()
+
+	llen, err := k.GetListLength(name)
+	if err != nil {
+		return
+	}
+
+	if llen == 0 {
+		return
+	}
+
+	value, err = client.Do("RPOP", name)
+	return
+}
+
+func (k *keeper) GetList(name string, size int64, page int64) (value interface{}, err error) {
+	offset := utils.Offset(page, size)
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	llen, err := k.GetListLength(name)
+	if err != nil {
+		return
+	}
+
+	if llen == 0 {
+		return
+	}
+
+	end := offset + size
+
+	value, err = client.Do("LRANGE", name, offset, end)
+	return
 }

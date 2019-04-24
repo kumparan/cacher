@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/garyburd/redigo/redis"
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/stretchr/testify/assert"
 
@@ -28,6 +29,35 @@ func newRedisConn(url string) *redigo.Pool {
 			return err
 		},
 	}
+}
+
+func TestCheckKeyExist(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+	k.SetWaitTime(1 * time.Second) // override wait time to 1 second
+
+	testKey := "test-key"
+
+	t.Run("Not Exist", func(t *testing.T) {
+		result, err := k.CheckKeyExist(testKey)
+		assert.NoError(t, err)
+		assert.EqualValues(t, result, false)
+	})
+
+	t.Run("Exist", func(t *testing.T) {
+		val := "something-something-here"
+		m.Set(testKey, val)
+		result, err := k.CheckKeyExist(testKey)
+		assert.NoError(t, err)
+		assert.EqualValues(t, result, true)
+	})
 }
 
 func TestGet(t *testing.T) {
@@ -393,4 +423,95 @@ func TestExpireMulti(t *testing.T) {
 
 	assert.EqualValues(t, newTTL1, m.TTL(key1))
 	assert.EqualValues(t, newTTL2, m.TTL(key2))
+}
+
+func TestGetLockStoreRightLeftList(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+	k.SetWaitTime(1 * time.Second) // override wait time to 1 second
+
+	name := "list-name"
+
+	var multiList []string
+
+	multiList = append(multiList, "test-response")
+	err = k.StoreLeftList(name, "test-response")
+	assert.NoError(t, err)
+
+	multiList = append(multiList, "test-response-2")
+	err = k.StoreRightList(name, "test-response-2")
+	assert.NoError(t, err)
+
+	res2, err2 := k.GetList(name, 2, 1)
+	resultList, err := redis.Strings(res2, nil)
+	assert.EqualValues(t, multiList, resultList)
+	assert.NoError(t, err2)
+
+}
+
+func TestGetAndRemoveFirstAndLastListElement(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+	k.SetWaitTime(1 * time.Second) // override wait time to 1 second
+
+	name := "list-name"
+
+	err = k.StoreRightList(name, "test-response")
+	assert.NoError(t, err)
+
+	err = k.StoreRightList(name, "test-response-2")
+	assert.NoError(t, err)
+
+	err = k.StoreRightList(name, "test-response-3")
+	assert.NoError(t, err)
+
+	res3, err3 := k.GetAndRemoveFirstListElement(name)
+	firstElement, err := redis.String(res3, nil)
+	assert.EqualValues(t, firstElement, "test-response")
+	assert.NoError(t, err3)
+
+	res4, err4 := k.GetAndRemoveLastListElement(name)
+	lastElement, err := redis.String(res4, nil)
+	assert.EqualValues(t, lastElement, "test-response-3")
+	assert.NoError(t, err4)
+
+}
+func TestGetListLength(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+	k.SetWaitTime(1 * time.Second) // override wait time to 1 second
+
+	name := "list-name"
+
+	err = k.StoreRightList(name, "test-response")
+	assert.NoError(t, err)
+
+	err = k.StoreRightList(name, "test-response-2")
+	assert.NoError(t, err)
+
+	res3, err3 := k.GetListLength(name)
+	assert.EqualValues(t, res3, 2)
+	assert.NoError(t, err3)
+
 }

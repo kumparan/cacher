@@ -17,6 +17,11 @@ type (
 		value interface{}
 		ttl   time.Duration
 	}
+
+	list struct {
+		name  string
+		value interface{}
+	}
 )
 
 // NewItem :nodoc:
