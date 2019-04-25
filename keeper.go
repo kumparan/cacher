@@ -203,6 +203,7 @@ func (k *keeper) Purge(matchString string) error {
 	var cursor interface{}
 	var stop []uint8
 	cursor = "0"
+	delCount := 0
 	for {
 		res, err := redigo.Values(client.Do("SCAN", cursor, "MATCH", matchString))
 		if err != nil {
@@ -212,6 +213,7 @@ func (k *keeper) Purge(matchString string) error {
 		if foundKeys, ok := res[1].([]interface{}); ok {
 			if len(foundKeys) > 0 {
 				client.Send("DEL", foundKeys...)
+				delCount++
 			}
 
 			// ascii for '0' is 48
@@ -221,6 +223,9 @@ func (k *keeper) Purge(matchString string) error {
 		}
 
 		cursor = res[0]
+	}
+	if delCount > 0 {
+		client.Flush()
 	}
 	return nil
 }
