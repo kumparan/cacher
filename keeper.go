@@ -205,7 +205,7 @@ func (k *keeper) Purge(matchString string) error {
 	cursor = "0"
 	delCount := 0
 	for {
-		res, err := redigo.Values(client.Do("SCAN", cursor, "MATCH", matchString))
+		res, err := redigo.Values(client.Do("SCAN", cursor, "MATCH", matchString, "COUNT", 500000))
 		if err != nil {
 			return err
 		}
