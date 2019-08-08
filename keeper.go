@@ -510,7 +510,10 @@ func (k *keeper) GetTTL(name string) (value int64, err error) {
 	defer client.Close()
 
 	val, err := client.Do("TTL", name)
-	value = val.(int64)
+	if err != nil {
+		return
+	}
 
+	value = val.(int64)
 	return
 }
