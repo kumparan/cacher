@@ -55,6 +55,8 @@ type (
 		GetListLength(string) (int64, error)
 		GetAndRemoveFirstListElement(string) (interface{}, error)
 		GetAndRemoveLastListElement(string) (interface{}, error)
+
+		GetTTL(string) (int64, error)
 	}
 
 	keeper struct {
@@ -500,5 +502,18 @@ func (k *keeper) GetList(name string, size int64, page int64) (value interface{}
 	end := offset + size
 
 	value, err = client.Do("LRANGE", name, offset, end)
+	return
+}
+
+func (k *keeper) GetTTL(name string) (value int64, err error) {
+	client := k.connPool.Get()
+	defer client.Close()
+
+	val, err := client.Do("TTL", name)
+	if err != nil {
+		return
+	}
+
+	value = val.(int64)
 	return
 }

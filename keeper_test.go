@@ -515,3 +515,28 @@ func TestGetListLength(t *testing.T) {
 	assert.NoError(t, err3)
 
 }
+func TestGetTTL(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+	k.SetWaitTime(1 * time.Second) // override wait time to 1 second
+
+	testKey := "list-name"
+
+	itemWithTTL := NewItemWithCustomTTL(testKey, nil, 100*time.Second)
+	err = k.StoreWithoutBlocking(itemWithTTL)
+	assert.NoError(t, err)
+
+	ttl, err := k.GetTTL(testKey)
+	assert.NoError(t, err)
+	assert.NotEqual(t, ttl, 0)
+	var typeInt64 int64
+	assert.IsType(t, typeInt64, ttl)
+
+}
