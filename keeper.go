@@ -2,6 +2,8 @@ package cacher
 
 import (
 	"errors"
+	"fmt"
+	"math"
 	"time"
 
 	"github.com/go-redsync/redsync"
@@ -57,6 +59,11 @@ type (
 		GetAndRemoveLastListElement(string) (interface{}, error)
 
 		GetTTL(string) (int64, error)
+
+		// HASH
+		StoreHashSet(string, int64, Item) error
+		GetHashSet(string, int64, string) (interface{}, error)
+		RemoveHashMember(string, int64, string) error
 	}
 
 	keeper struct {
@@ -515,5 +522,47 @@ func (k *keeper) GetTTL(name string) (value int64, err error) {
 	}
 
 	value = val.(int64)
+	return
+}
+
+func (k *keeper) StoreHashSet(identifier string, id int64, c Item) (err error) {
+	if k.disableCaching {
+		return nil
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	bucket := float64(id / 1e16)
+
+	_, err = client.Do("HSET", fmt.Sprintf("%s:%d", identifier, int64(math.Ceil(bucket))), c.GetKey(), c.GetValue())
+	return
+}
+
+func (k *keeper) GetHashSet(identifier string, id int64, key string) (value interface{}, err error) {
+	if k.disableCaching {
+		return
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	bucket := float64(id / 1e16)
+
+	value, err = client.Do("HGET", fmt.Sprintf("%s:%d", identifier, int64(math.Ceil(bucket))), key)
+	return
+}
+
+func (k *keeper) RemoveHashMember(identifier string, id int64, key string) (err error) {
+	if k.disableCaching {
+		return
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	bucket := float64(id / 1000)
+
+	_, err = client.Do("HDEL", fmt.Sprintf("%s:%d", identifier, int64(math.Ceil(bucket))), key)
 	return
 }
