@@ -484,7 +484,7 @@ func (k *keeper) GetAndRemoveLastListElement(name string) (value interface{}, er
 }
 
 func (k *keeper) GetList(name string, size int64, page int64) (value interface{}, err error) {
-	offset := offset(page, size)
+	offset := getOffset(page, size)
 
 	client := k.connPool.Get()
 	defer client.Close()
@@ -517,8 +517,8 @@ func (k *keeper) GetTTL(name string) (value int64, err error) {
 	return
 }
 
-// offset to get offset from page and limit, min value for page = 1
-func offset(page, limit int64) int64 {
+// getOffset to get offset from page and limit, min value for page = 1
+func getOffset(page, limit int64) int64 {
 	offset := (page - 1) * limit
 	if offset < 0 {
 		return 0
