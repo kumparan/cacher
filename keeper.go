@@ -629,15 +629,14 @@ func (k *keeper) RemoveHashMember(identifier string, id int64, key string) (err 
 		}
 		stop = res[0].([]uint8)
 		if foundKeys, ok := res[1].([]interface{}); ok {
-			tempStorage := []interface{}{}
-			for idx, key := range foundKeys {
+			for idx := range foundKeys {
 				if idx%2 == 0 {
-					tempStorage = append(tempStorage, key)
+					continue
 				}
-				continue
+				foundKeys = append(foundKeys[:idx], foundKeys[idx+1:]...)
 			}
-			if len(tempStorage) > 0 {
-				client.Send("HDEL", tempStorage...)
+			if len(foundKeys) > 0 {
+				client.Send("HDEL", append([]interface{}{fmt.Sprintf("%s:%v", identifier, str[0:4])}, foundKeys...)...)
 				delCount++
 			}
 
