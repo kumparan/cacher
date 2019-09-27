@@ -3,7 +3,7 @@ package cacher
 import (
 	"errors"
 	"fmt"
-	"math"
+	"strconv"
 	"time"
 
 	"github.com/go-redsync/redsync"
@@ -60,9 +60,11 @@ type (
 
 		GetTTL(string) (int64, error)
 
-		// HASH
+		// HASH BUCKET
+		GetOrLockHash(string, int64, string) (interface{}, *redsync.Mutex, error)
 		StoreHashSet(string, int64, Item) error
 		GetHashSet(string, int64, string) (interface{}, error)
+		DeleteMemberInHash(string, int64, string) error
 		RemoveHashMember(string, int64, string) error
 	}
 
@@ -533,10 +535,52 @@ func (k *keeper) StoreHashSet(identifier string, id int64, c Item) (err error) {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	bucket := float64(id / 1e16)
-
-	_, err = client.Do("HSET", fmt.Sprintf("%s:%d", identifier, int64(math.Ceil(bucket))), c.GetKey(), c.GetValue())
+	str := strconv.FormatInt(id, 10)
+	_, err = client.Do("HSET", fmt.Sprintf("%s:%v", identifier, str[0:4]), c.GetKey(), c.GetValue())
 	return
+}
+
+// GetOrLockHash :nodoc:
+func (k *keeper) GetOrLockHash(identifier string, id int64, key string) (cachedItem interface{}, mutex *redsync.Mutex, err error) {
+	if k.disableCaching {
+		return
+	}
+
+	cachedItem, err = k.GetHashSet(identifier, id, key)
+	if err != nil && err != redigo.ErrNil || cachedItem != nil {
+		return
+	}
+
+	mutex, err = k.AcquireLock(key)
+	if err == nil {
+		return
+	}
+
+	start := time.Now()
+	for {
+		b := &backoff.Backoff{
+			Min:    20 * time.Millisecond,
+			Max:    200 * time.Millisecond,
+			Jitter: true,
+		}
+
+		if !k.isLocked(key) {
+			cachedItem, err = k.GetHashSet(identifier, id, key)
+			if err != nil && err != redigo.ErrNil || cachedItem != nil {
+				return
+			}
+			return nil, nil, nil
+		}
+
+		elapsed := time.Since(start)
+		if elapsed >= k.waitTime {
+			break
+		}
+
+		time.Sleep(b.Duration())
+	}
+
+	return nil, nil, errors.New("wait too long")
 }
 
 func (k *keeper) GetHashSet(identifier string, id int64, key string) (value interface{}, err error) {
@@ -547,13 +591,12 @@ func (k *keeper) GetHashSet(identifier string, id int64, key string) (value inte
 	client := k.connPool.Get()
 	defer client.Close()
 
-	bucket := float64(id / 1e16)
-
-	value, err = client.Do("HGET", fmt.Sprintf("%s:%d", identifier, int64(math.Ceil(bucket))), key)
+	str := strconv.FormatInt(id, 10)
+	value, err = client.Do("HGET", fmt.Sprintf("%s:%v", identifier, str[0:4]), key)
 	return
 }
 
-func (k *keeper) RemoveHashMember(identifier string, id int64, key string) (err error) {
+func (k *keeper) DeleteMemberInHash(identifier string, id int64, key string) (err error) {
 	if k.disableCaching {
 		return
 	}
@@ -561,8 +604,53 @@ func (k *keeper) RemoveHashMember(identifier string, id int64, key string) (err 
 	client := k.connPool.Get()
 	defer client.Close()
 
-	bucket := float64(id / 1000)
-
-	_, err = client.Do("HDEL", fmt.Sprintf("%s:%d", identifier, int64(math.Ceil(bucket))), key)
+	str := strconv.FormatInt(id, 10)
+	_, err = client.Do("HDEL", fmt.Sprintf("%s:%v", identifier, str[0:4]), key)
 	return
+}
+
+func (k *keeper) RemoveHashMember(identifier string, id int64, key string) (err error) {
+	if k.disableCaching {
+		return nil
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	str := strconv.FormatInt(id, 10)
+	var cursor interface{}
+	var stop []uint8
+	cursor = "0"
+	delCount := 0
+	for {
+		res, err := redigo.Values(client.Do("HSCAN", fmt.Sprintf("%s:%v", identifier, str[0:4]), cursor, "MATCH", key, "COUNT", 1000))
+		if err != nil {
+			return err
+		}
+		stop = res[0].([]uint8)
+		if foundKeys, ok := res[1].([]interface{}); ok {
+			tempStorage := []interface{}{}
+			for idx, key := range foundKeys {
+				if idx%2 == 0 {
+					tempStorage = append(tempStorage, key)
+				}
+				continue
+			}
+			if len(tempStorage) > 0 {
+				client.Send("HDEL", tempStorage...)
+				delCount++
+			}
+
+			// ascii for '0' is 48
+			if stop[0] == 48 {
+				break
+			}
+		}
+
+		cursor = res[0]
+	}
+	if delCount > 0 {
+		client.Flush()
+	}
+	return nil
 }
