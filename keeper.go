@@ -193,6 +193,7 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 	return err
 }
 
+// StoreNil :nodoc:
 func (k *keeper) StoreNil(cacheKey string, ttl time.Duration) error {
 	nilJSON := []byte("null")
 
