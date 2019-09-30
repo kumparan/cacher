@@ -30,6 +30,7 @@ type (
 		StoreWithoutBlocking(Item) error
 		StoreMultiWithoutBlocking([]Item) error
 		StoreMultiPersist([]Item) error
+		StoreNil(cacheKey string, ttl time.Duration) error
 		Expire(string, time.Duration) error
 		ExpireMulti(map[string]time.Duration) error
 		Purge(string) error
@@ -189,6 +190,14 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 	defer client.Close()
 
 	_, err := client.Do("SETEX", c.GetKey(), k.decideCacheTTL(c), c.GetValue())
+	return err
+}
+
+func (k *keeper) StoreNil(cacheKey string, ttl time.Duration) error {
+	nilJSON := []byte("null")
+
+	item := NewItemWithCustomTTL(cacheKey, nilJSON, ttl)
+	err := k.StoreWithoutBlocking(item)
 	return err
 }
 

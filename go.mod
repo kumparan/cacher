@@ -8,6 +8,7 @@ require (
 	github.com/gomodule/redigo v2.0.0+incompatible
 	github.com/jpillora/backoff v0.0.0-20180909062703-3050d21c67d7
 	github.com/kumparan/go-lib v1.0.0
+	github.com/kumparan/tapao v1.0.0
 	github.com/stretchr/testify v1.3.0
 	github.com/yuin/gopher-lua v0.0.0-20190206043414-8bfc7677f583 // indirect
 )

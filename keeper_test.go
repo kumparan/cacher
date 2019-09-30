@@ -540,3 +540,26 @@ func TestGetTTL(t *testing.T) {
 	assert.IsType(t, typeInt64, ttl)
 
 }
+
+func TestStoreNil(t *testing.T) {
+	k := NewKeeper()
+	m, err := miniredis.Run()
+
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+	k.SetWaitTime(1 * time.Second)
+
+	testKey := "test-key"
+
+	err = k.StoreNil(testKey, 5*time.Minute)
+	assert.NoError(t, err)
+
+	reply, mu, err := k.GetOrLock(testKey)
+
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("null"), reply)
+	assert.Nil(t, mu)
+}
