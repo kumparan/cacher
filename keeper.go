@@ -2,7 +2,6 @@ package cacher
 
 import (
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/go-redsync/redsync"
@@ -60,10 +59,10 @@ type (
 		GetTTL(string) (int64, error)
 
 		// HASH BUCKET
-		GetOrLockHash(string, int64, string) (interface{}, *redsync.Mutex, error)
-		StoreHashSet(string, int64, Item) error
-		GetHashSet(string, int64, string) (interface{}, error)
-		DeleteMemberInHash(string, int64, string) error
+		GetOrLockHash(string, string) (interface{}, *redsync.Mutex, error)
+		StoreHashSet(string, Item) error
+		GetHashSet(string, string) (interface{}, error)
+		DeleteMemberInHash(string, string) error
 	}
 
 	keeper struct {
@@ -525,7 +524,7 @@ func (k *keeper) GetTTL(name string) (value int64, err error) {
 	return
 }
 
-func (k *keeper) StoreHashSet(identifier string, id int64, c Item) (err error) {
+func (k *keeper) StoreHashSet(identifier string, c Item) (err error) {
 	if k.disableCaching {
 		return nil
 	}
@@ -535,20 +534,20 @@ func (k *keeper) StoreHashSet(identifier string, id int64, c Item) (err error) {
 
 	client.Send("MULTI")
 
-	client.Do("HSET", fmt.Sprintf("%s:%v", identifier, id), c.GetKey(), c.GetValue())
-	client.Do("EXPIRE", fmt.Sprintf("%s:%v", identifier, id), k.decideCacheTTL(c))
+	client.Do("HSET", identifier, c.GetKey(), c.GetValue())
+	client.Do("EXPIRE", identifier, k.decideCacheTTL(c))
 
 	_, err = client.Do("EXEC")
 	return
 }
 
 // GetOrLockHash :nodoc:
-func (k *keeper) GetOrLockHash(identifier string, id int64, key string) (cachedItem interface{}, mutex *redsync.Mutex, err error) {
+func (k *keeper) GetOrLockHash(identifier string, key string) (cachedItem interface{}, mutex *redsync.Mutex, err error) {
 	if k.disableCaching {
 		return
 	}
 
-	cachedItem, err = k.GetHashSet(identifier, id, key)
+	cachedItem, err = k.GetHashSet(identifier, key)
 	if err != nil && err != redigo.ErrNil || cachedItem != nil {
 		return
 	}
@@ -567,7 +566,7 @@ func (k *keeper) GetOrLockHash(identifier string, id int64, key string) (cachedI
 		}
 
 		if !k.isLocked(key) {
-			cachedItem, err = k.GetHashSet(identifier, id, key)
+			cachedItem, err = k.GetHashSet(identifier, key)
 			if err != nil && err != redigo.ErrNil || cachedItem != nil {
 				return
 			}
@@ -585,7 +584,7 @@ func (k *keeper) GetOrLockHash(identifier string, id int64, key string) (cachedI
 	return nil, nil, errors.New("wait too long")
 }
 
-func (k *keeper) GetHashSet(identifier string, id int64, key string) (value interface{}, err error) {
+func (k *keeper) GetHashSet(identifier string, key string) (value interface{}, err error) {
 	if k.disableCaching {
 		return
 	}
@@ -593,11 +592,11 @@ func (k *keeper) GetHashSet(identifier string, id int64, key string) (value inte
 	client := k.connPool.Get()
 	defer client.Close()
 
-	value, err = client.Do("HGET", fmt.Sprintf("%s:%v", identifier, id), key)
+	value, err = client.Do("HGET", identifier, key)
 	return
 }
 
-func (k *keeper) DeleteMemberInHash(identifier string, id int64, key string) (err error) {
+func (k *keeper) DeleteMemberInHash(identifier string, key string) (err error) {
 	if k.disableCaching {
 		return
 	}
@@ -605,6 +604,6 @@ func (k *keeper) DeleteMemberInHash(identifier string, id int64, key string) (er
 	client := k.connPool.Get()
 	defer client.Close()
 
-	_, err = client.Do("HDEL", fmt.Sprintf("%s:%v", identifier, id), key)
+	_, err = client.Do("HDEL", identifier, key)
 	return
 }
