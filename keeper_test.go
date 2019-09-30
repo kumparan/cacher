@@ -554,7 +554,7 @@ func TestStoreNil(t *testing.T) {
 
 	testKey := "test-key"
 
-	err = k.StoreNil(testKey, 5*time.Minute)
+	err = k.StoreNil(testKey)
 	assert.NoError(t, err)
 
 	reply, mu, err := k.GetOrLock(testKey)
