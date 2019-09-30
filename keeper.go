@@ -3,7 +3,6 @@ package cacher
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/go-redsync/redsync"
@@ -65,7 +64,6 @@ type (
 		StoreHashSet(string, int64, Item) error
 		GetHashSet(string, int64, string) (interface{}, error)
 		DeleteMemberInHash(string, int64, string) error
-		RemoveHashMember(string, int64, string) error
 	}
 
 	keeper struct {
@@ -535,8 +533,12 @@ func (k *keeper) StoreHashSet(identifier string, id int64, c Item) (err error) {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	str := strconv.FormatInt(id, 10)
-	_, err = client.Do("HSET", fmt.Sprintf("%s:%v", identifier, str[0:4]), c.GetKey(), c.GetValue())
+	client.Send("MULTI")
+
+	client.Do("HSET", fmt.Sprintf("%s:%v", identifier, id), c.GetKey(), c.GetValue())
+	client.Do("EXPIRE", fmt.Sprintf("%s:%v", identifier, id), k.decideCacheTTL(c))
+
+	_, err = client.Do("EXEC")
 	return
 }
 
@@ -591,8 +593,7 @@ func (k *keeper) GetHashSet(identifier string, id int64, key string) (value inte
 	client := k.connPool.Get()
 	defer client.Close()
 
-	str := strconv.FormatInt(id, 10)
-	value, err = client.Do("HGET", fmt.Sprintf("%s:%v", identifier, str[0:4]), key)
+	value, err = client.Do("HGET", fmt.Sprintf("%s:%v", identifier, id), key)
 	return
 }
 
@@ -604,52 +605,6 @@ func (k *keeper) DeleteMemberInHash(identifier string, id int64, key string) (er
 	client := k.connPool.Get()
 	defer client.Close()
 
-	str := strconv.FormatInt(id, 10)
-	_, err = client.Do("HDEL", fmt.Sprintf("%s:%v", identifier, str[0:4]), key)
+	_, err = client.Do("HDEL", fmt.Sprintf("%s:%v", identifier, id), key)
 	return
-}
-
-func (k *keeper) RemoveHashMember(identifier string, id int64, key string) (err error) {
-	if k.disableCaching {
-		return nil
-	}
-
-	client := k.connPool.Get()
-	defer client.Close()
-
-	str := strconv.FormatInt(id, 10)
-	var cursor interface{}
-	var stop []uint8
-	cursor = "0"
-	delCount := 0
-	for {
-		res, err := redigo.Values(client.Do("HSCAN", fmt.Sprintf("%s:%v", identifier, str[0:4]), cursor, "MATCH", key, "COUNT", 1000))
-		if err != nil {
-			return err
-		}
-		stop = res[0].([]uint8)
-		if foundKeys, ok := res[1].([]interface{}); ok {
-			for idx := range foundKeys {
-				if idx%2 == 0 {
-					continue
-				}
-				foundKeys = append(foundKeys[:idx], foundKeys[idx+1:]...)
-			}
-			if len(foundKeys) > 0 {
-				client.Send("HDEL", append([]interface{}{fmt.Sprintf("%s:%v", identifier, str[0:4])}, foundKeys...)...)
-				delCount++
-			}
-
-			// ascii for '0' is 48
-			if stop[0] == 48 {
-				break
-			}
-		}
-
-		cursor = res[0]
-	}
-	if delCount > 0 {
-		client.Flush()
-	}
-	return nil
 }
