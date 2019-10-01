@@ -63,10 +63,10 @@ type (
 		GetTTL(string) (int64, error)
 
 		// HASH BUCKET
-		GetHashOrLock(string, string) (interface{}, *redsync.Mutex, error)
+		GetHashOrLock(identifier string, key string) (interface{}, *redsync.Mutex, error)
 		StoreHash(string, Item) error
-		GetHashMember(string, string) (interface{}, error)
-		DeleteHashMember(string, string) error
+		GetHashMember(identifier string, key string) (interface{}, error)
+		DeleteHashMember(identifier string, key string) error
 	}
 
 	keeper struct {
@@ -233,7 +233,10 @@ func (k *keeper) Purge(matchString string) error {
 		stop = res[0].([]uint8)
 		if foundKeys, ok := res[1].([]interface{}); ok {
 			if len(foundKeys) > 0 {
-				client.Send("DEL", foundKeys...)
+				err = client.Send("DEL", foundKeys...)
+				if err != nil {
+					return err
+				}
 				delCount++
 			}
 
@@ -341,12 +344,18 @@ func (k *keeper) StoreMultiWithoutBlocking(items []Item) error {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	client.Send("MULTI")
+	err := client.Send("MULTI")
+	if err != nil {
+		return err
+	}
 	for _, item := range items {
-		client.Send("SETEX", item.GetKey(), k.decideCacheTTL(item), item.GetValue())
+		err = client.Send("SETEX", item.GetKey(), k.decideCacheTTL(item), item.GetValue())
+		if err != nil {
+			return err
+		}
 	}
 
-	_, err := client.Do("EXEC")
+	_, err = client.Do("EXEC")
 	return err
 }
 
@@ -359,13 +368,22 @@ func (k *keeper) StoreMultiPersist(items []Item) error {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	client.Send("MULTI")
+	err := client.Send("MULTI")
+	if err != nil {
+		return err
+	}
 	for _, item := range items {
-		client.Send("SET", item.GetKey(), item.GetValue())
-		client.Send("PERSIST", item.GetKey())
+		err = client.Send("SET", item.GetKey(), item.GetValue())
+		if err != nil {
+			return err
+		}
+		err = client.Send("PERSIST", item.GetKey())
+		if err != nil {
+			return err
+		}
 	}
 
-	_, err := client.Do("EXEC")
+	_, err = client.Do("EXEC")
 	return err
 }
 
@@ -391,12 +409,18 @@ func (k *keeper) ExpireMulti(items map[string]time.Duration) error {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	client.Send("MULTI")
+	err := client.Send("MULTI")
+	if err != nil {
+		return err
+	}
 	for k, duration := range items {
-		client.Send("EXPIRE", k, int64(duration.Seconds()))
+		err = client.Send("EXPIRE", k, int64(duration.Seconds()))
+		if err != nil {
+			return err
+		}
 	}
 
-	_, err := client.Do("EXEC")
+	_, err = client.Do("EXEC")
 	return err
 }
 
@@ -558,10 +582,18 @@ func (k *keeper) StoreHash(identifier string, c Item) (err error) {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	client.Send("MULTI")
-
-	client.Do("HSET", identifier, c.GetKey(), c.GetValue())
-	client.Do("EXPIRE", identifier, k.decideCacheTTL(c))
+	err = client.Send("MULTI")
+	if err != nil {
+		return err
+	}
+	_, err = client.Do("HSET", identifier, c.GetKey(), c.GetValue())
+	if err != nil {
+		return err
+	}
+	_, err = client.Do("EXPIRE", identifier, k.decideCacheTTL(c))
+	if err != nil {
+		return err
+	}
 
 	_, err = client.Do("EXEC")
 	return

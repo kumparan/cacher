@@ -53,7 +53,7 @@ func TestCheckKeyExist(t *testing.T) {
 
 	t.Run("Exist", func(t *testing.T) {
 		val := "something-something-here"
-		m.Set(testKey, val)
+		_ = m.Set(testKey, val)
 		result, err := k.CheckKeyExist(testKey)
 		assert.NoError(t, err)
 		assert.EqualValues(t, result, true)
@@ -83,7 +83,7 @@ func TestGet(t *testing.T) {
 
 	t.Run("Exist", func(t *testing.T) {
 		val := "something-something-here"
-		m.Set(testKey, val)
+		_ = m.Set(testKey, val)
 		result, err := k.Get(testKey)
 		assert.NoError(t, err)
 		assert.EqualValues(t, result, val)
@@ -248,7 +248,7 @@ func TestIncreaseCachedValueByOne(t *testing.T) {
 	err = k.IncreaseCachedValueByOne(testKey)
 	assert.NoError(t, err)
 
-	reply, mu, err := k.GetOrLock(testKey)
+	reply, _, err := k.GetOrLock(testKey)
 	assert.NoError(t, err)
 
 	var count int64
@@ -360,7 +360,7 @@ func TestStoreMultiPersist(t *testing.T) {
 	k.SetConnectionPool(r)
 	k.SetLockConnectionPool(r)
 
-	err = k.StoreMultiPersist([]Item{
+	_ = k.StoreMultiPersist([]Item{
 		NewItem("abc", "hehehe"),
 		NewItem("def", "hohoho"),
 	})
@@ -385,11 +385,11 @@ func TestExpire(t *testing.T) {
 
 	key := "combro"
 
-	m.Set(key, "enaq scully")
+	_ = m.Set(key, "enaq scully")
 	m.SetTTL(key, 60*time.Second)
 
 	newTTL := 66 * time.Hour
-	k.Expire(key, newTTL)
+	_ = k.Expire(key, newTTL)
 
 	assert.EqualValues(t, newTTL, m.TTL(key))
 }
@@ -408,15 +408,15 @@ func TestExpireMulti(t *testing.T) {
 	key1 := "combro"
 	key2 := "kuelapis"
 
-	m.Set(key1, "enaq scully")
+	_ = m.Set(key1, "enaq scully")
 	m.SetTTL(key1, 5*time.Second)
-	m.Set(key2, "mantul over 9000")
+	_ = m.Set(key2, "mantul over 9000")
 	m.SetTTL(key2, 9*time.Second)
 
 	newTTL1 := 66 * time.Hour
 	newTTL2 := 77 * time.Hour
 
-	k.ExpireMulti(map[string]time.Duration{
+	_ = k.ExpireMulti(map[string]time.Duration{
 		key1: newTTL1,
 		key2: newTTL2,
 	})
@@ -450,7 +450,7 @@ func TestGetLockStoreRightLeftList(t *testing.T) {
 	assert.NoError(t, err)
 
 	res2, err2 := k.GetList(name, 2, 1)
-	resultList, err := redis.Strings(res2, nil)
+	resultList, _ := redis.Strings(res2, nil)
 	assert.EqualValues(t, multiList, resultList)
 	assert.NoError(t, err2)
 
@@ -480,12 +480,12 @@ func TestGetAndRemoveFirstAndLastListElement(t *testing.T) {
 	assert.NoError(t, err)
 
 	res3, err3 := k.GetAndRemoveFirstListElement(name)
-	firstElement, err := redis.String(res3, nil)
+	firstElement, _ := redis.String(res3, nil)
 	assert.EqualValues(t, firstElement, "test-response")
 	assert.NoError(t, err3)
 
 	res4, err4 := k.GetAndRemoveLastListElement(name)
-	lastElement, err := redis.String(res4, nil)
+	lastElement, _ := redis.String(res4, nil)
 	assert.EqualValues(t, lastElement, "test-response-3")
 	assert.NoError(t, err4)
 
