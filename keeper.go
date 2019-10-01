@@ -59,10 +59,10 @@ type (
 		GetTTL(string) (int64, error)
 
 		// HASH BUCKET
-		GetOrLockHash(string, string) (interface{}, *redsync.Mutex, error)
-		StoreHashSet(string, Item) error
-		GetHashSet(string, string) (interface{}, error)
-		DeleteMemberInHash(string, string) error
+		GetHashOrLock(string, string) (interface{}, *redsync.Mutex, error)
+		StoreHash(string, Item) error
+		GetHashMember(string, string) (interface{}, error)
+		DeleteHashMember(string, string) error
 	}
 
 	keeper struct {
@@ -524,7 +524,7 @@ func (k *keeper) GetTTL(name string) (value int64, err error) {
 	return
 }
 
-func (k *keeper) StoreHashSet(identifier string, c Item) (err error) {
+func (k *keeper) StoreHash(identifier string, c Item) (err error) {
 	if k.disableCaching {
 		return nil
 	}
@@ -542,12 +542,12 @@ func (k *keeper) StoreHashSet(identifier string, c Item) (err error) {
 }
 
 // GetOrLockHash :nodoc:
-func (k *keeper) GetOrLockHash(identifier string, key string) (cachedItem interface{}, mutex *redsync.Mutex, err error) {
+func (k *keeper) GetHashOrLock(identifier string, key string) (cachedItem interface{}, mutex *redsync.Mutex, err error) {
 	if k.disableCaching {
 		return
 	}
 
-	cachedItem, err = k.GetHashSet(identifier, key)
+	cachedItem, err = k.GetHashMember(identifier, key)
 	if err != nil && err != redigo.ErrNil || cachedItem != nil {
 		return
 	}
@@ -566,7 +566,7 @@ func (k *keeper) GetOrLockHash(identifier string, key string) (cachedItem interf
 		}
 
 		if !k.isLocked(key) {
-			cachedItem, err = k.GetHashSet(identifier, key)
+			cachedItem, err = k.GetHashMember(identifier, key)
 			if err != nil && err != redigo.ErrNil || cachedItem != nil {
 				return
 			}
@@ -584,7 +584,7 @@ func (k *keeper) GetOrLockHash(identifier string, key string) (cachedItem interf
 	return nil, nil, errors.New("wait too long")
 }
 
-func (k *keeper) GetHashSet(identifier string, key string) (value interface{}, err error) {
+func (k *keeper) GetHashMember(identifier string, key string) (value interface{}, err error) {
 	if k.disableCaching {
 		return
 	}
@@ -596,7 +596,7 @@ func (k *keeper) GetHashSet(identifier string, key string) (value interface{}, e
 	return
 }
 
-func (k *keeper) DeleteMemberInHash(identifier string, key string) (err error) {
+func (k *keeper) DeleteHashMember(identifier string, key string) (err error) {
 	if k.disableCaching {
 		return
 	}
