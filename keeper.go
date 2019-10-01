@@ -591,7 +591,7 @@ func (k *keeper) GetHashOrLock(identifier string, key string) (cachedItem interf
 			Jitter: true,
 		}
 
-		if !k.isLocked(key) {
+		if !k.isLocked(identifier) {
 			cachedItem, err = k.GetHashMember(identifier, key)
 			if err != nil && err != redigo.ErrNil || cachedItem != nil {
 				return
