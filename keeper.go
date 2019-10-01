@@ -63,8 +63,8 @@ type (
 		GetTTL(string) (int64, error)
 
 		// HASH BUCKET
-		GetHashOrLock(identifier string, key string) (interface{}, *redsync.Mutex, error)
-		StoreHash(string, Item) error
+		GetHashMemberOrLock(identifier string, key string) (interface{}, *redsync.Mutex, error)
+		StoreHashMember(string, Item) error
 		GetHashMember(identifier string, key string) (interface{}, error)
 		DeleteHashMember(identifier string, key string) error
 	}
@@ -574,7 +574,8 @@ func getOffset(page, limit int64) int64 {
 	return offset
 }
 
-func (k *keeper) StoreHash(identifier string, c Item) (err error) {
+// StoreHashMember :nodoc:
+func (k *keeper) StoreHashMember(identifier string, c Item) (err error) {
 	if k.disableCaching {
 		return nil
 	}
@@ -600,7 +601,7 @@ func (k *keeper) StoreHash(identifier string, c Item) (err error) {
 }
 
 // GetOrLockHash :nodoc:
-func (k *keeper) GetHashOrLock(identifier string, key string) (cachedItem interface{}, mutex *redsync.Mutex, err error) {
+func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem interface{}, mutex *redsync.Mutex, err error) {
 	if k.disableCaching {
 		return
 	}
@@ -642,6 +643,7 @@ func (k *keeper) GetHashOrLock(identifier string, key string) (cachedItem interf
 	return nil, nil, errors.New("wait too long")
 }
 
+// StoreHashMember :nodoc:
 func (k *keeper) GetHashMember(identifier string, key string) (value interface{}, err error) {
 	if k.disableCaching {
 		return
@@ -654,6 +656,7 @@ func (k *keeper) GetHashMember(identifier string, key string) (value interface{}
 	return
 }
 
+// DeleteHashMember :nodoc:
 func (k *keeper) DeleteHashMember(identifier string, key string) (err error) {
 	if k.disableCaching {
 		return
