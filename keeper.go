@@ -12,10 +12,13 @@ import (
 const (
 	// Override these when constructing the cache keeper
 	defaultTTL          = 10 * time.Second
+	defaultNilTTL       = 5 * time.Minute
 	defaultLockDuration = 1 * time.Minute
 	defaultLockTries    = 1
 	defaultWaitTime     = 15 * time.Second
 )
+
+var nilJSON = []byte("null")
 
 type (
 	// CacheGeneratorFn :nodoc:
@@ -30,6 +33,7 @@ type (
 		StoreWithoutBlocking(Item) error
 		StoreMultiWithoutBlocking([]Item) error
 		StoreMultiPersist([]Item) error
+		StoreNil(cacheKey string) error
 		Expire(string, time.Duration) error
 		ExpireMulti(map[string]time.Duration) error
 		Purge(string) error
@@ -38,6 +42,7 @@ type (
 
 		AcquireLock(string) (*redsync.Mutex, error)
 		SetDefaultTTL(time.Duration)
+		SetNilTTL(time.Duration)
 		SetConnectionPool(*redigo.Pool)
 		SetLockConnectionPool(*redigo.Pool)
 		SetLockDuration(time.Duration)
@@ -60,6 +65,7 @@ type (
 
 	keeper struct {
 		connPool       *redigo.Pool
+		nilTTL         time.Duration
 		defaultTTL     time.Duration
 		waitTime       time.Duration
 		disableCaching bool
@@ -74,6 +80,7 @@ type (
 func NewKeeper() Keeper {
 	return &keeper{
 		defaultTTL:     defaultTTL,
+		nilTTL:         defaultNilTTL,
 		lockDuration:   defaultLockDuration,
 		lockTries:      defaultLockTries,
 		waitTime:       defaultWaitTime,
@@ -192,6 +199,13 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 	return err
 }
 
+// StoreNil :nodoc:
+func (k *keeper) StoreNil(cacheKey string) error {
+	item := NewItemWithCustomTTL(cacheKey, nilJSON, k.nilTTL)
+	err := k.StoreWithoutBlocking(item)
+	return err
+}
+
 // Purge :nodoc:
 func (k *keeper) Purge(matchString string) error {
 	if k.disableCaching {
@@ -248,6 +262,10 @@ func (k *keeper) IncreaseCachedValueByOne(key string) error {
 // SetDefaultTTL :nodoc:
 func (k *keeper) SetDefaultTTL(d time.Duration) {
 	k.defaultTTL = d
+}
+
+func (k *keeper) SetNilTTL(d time.Duration) {
+	k.nilTTL = d
 }
 
 // SetConnectionPool :nodoc:
