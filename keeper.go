@@ -7,16 +7,18 @@ import (
 	"github.com/go-redsync/redsync"
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
-	"github.com/kumparan/go-lib/utils"
 )
 
 const (
 	// Override these when constructing the cache keeper
 	defaultTTL          = 10 * time.Second
+	defaultNilTTL       = 5 * time.Minute
 	defaultLockDuration = 1 * time.Minute
 	defaultLockTries    = 1
 	defaultWaitTime     = 15 * time.Second
 )
+
+var nilJSON = []byte("null")
 
 type (
 	// CacheGeneratorFn :nodoc:
@@ -31,6 +33,7 @@ type (
 		StoreWithoutBlocking(Item) error
 		StoreMultiWithoutBlocking([]Item) error
 		StoreMultiPersist([]Item) error
+		StoreNil(cacheKey string) error
 		Expire(string, time.Duration) error
 		ExpireMulti(map[string]time.Duration) error
 		Purge(string) error
@@ -39,6 +42,7 @@ type (
 
 		AcquireLock(string) (*redsync.Mutex, error)
 		SetDefaultTTL(time.Duration)
+		SetNilTTL(time.Duration)
 		SetConnectionPool(*redigo.Pool)
 		SetLockConnectionPool(*redigo.Pool)
 		SetLockDuration(time.Duration)
@@ -67,6 +71,7 @@ type (
 
 	keeper struct {
 		connPool       *redigo.Pool
+		nilTTL         time.Duration
 		defaultTTL     time.Duration
 		waitTime       time.Duration
 		disableCaching bool
@@ -81,6 +86,7 @@ type (
 func NewKeeper() Keeper {
 	return &keeper{
 		defaultTTL:     defaultTTL,
+		nilTTL:         defaultNilTTL,
 		lockDuration:   defaultLockDuration,
 		lockTries:      defaultLockTries,
 		waitTime:       defaultWaitTime,
@@ -199,6 +205,13 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 	return err
 }
 
+// StoreNil :nodoc:
+func (k *keeper) StoreNil(cacheKey string) error {
+	item := NewItemWithCustomTTL(cacheKey, nilJSON, k.nilTTL)
+	err := k.StoreWithoutBlocking(item)
+	return err
+}
+
 // Purge :nodoc:
 func (k *keeper) Purge(matchString string) error {
 	if k.disableCaching {
@@ -255,6 +268,10 @@ func (k *keeper) IncreaseCachedValueByOne(key string) error {
 // SetDefaultTTL :nodoc:
 func (k *keeper) SetDefaultTTL(d time.Duration) {
 	k.defaultTTL = d
+}
+
+func (k *keeper) SetNilTTL(d time.Duration) {
+	k.nilTTL = d
 }
 
 // SetConnectionPool :nodoc:
@@ -491,7 +508,7 @@ func (k *keeper) GetAndRemoveLastListElement(name string) (value interface{}, er
 }
 
 func (k *keeper) GetList(name string, size int64, page int64) (value interface{}, err error) {
-	offset := utils.Offset(page, size)
+	offset := getOffset(page, size)
 
 	client := k.connPool.Get()
 	defer client.Close()
@@ -522,6 +539,15 @@ func (k *keeper) GetTTL(name string) (value int64, err error) {
 
 	value = val.(int64)
 	return
+}
+
+// getOffset to get offset from page and limit, min value for page = 1
+func getOffset(page, limit int64) int64 {
+	offset := (page - 1) * limit
+	if offset < 0 {
+		return 0
+	}
+	return offset
 }
 
 func (k *keeper) StoreHash(identifier string, c Item) (err error) {
