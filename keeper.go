@@ -61,6 +61,12 @@ type (
 		GetAndRemoveLastListElement(string) (interface{}, error)
 
 		GetTTL(string) (int64, error)
+
+		// HASH BUCKET
+		GetHashMemberOrLock(identifier string, key string) (interface{}, *redsync.Mutex, error)
+		StoreHashMember(string, Item) error
+		GetHashMember(identifier string, key string) (interface{}, error)
+		DeleteHashMember(identifier string, key string) error
 	}
 
 	keeper struct {
@@ -227,7 +233,10 @@ func (k *keeper) Purge(matchString string) error {
 		stop = res[0].([]uint8)
 		if foundKeys, ok := res[1].([]interface{}); ok {
 			if len(foundKeys) > 0 {
-				client.Send("DEL", foundKeys...)
+				err = client.Send("DEL", foundKeys...)
+				if err != nil {
+					return err
+				}
 				delCount++
 			}
 
@@ -335,12 +344,18 @@ func (k *keeper) StoreMultiWithoutBlocking(items []Item) error {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	client.Send("MULTI")
+	err := client.Send("MULTI")
+	if err != nil {
+		return err
+	}
 	for _, item := range items {
-		client.Send("SETEX", item.GetKey(), k.decideCacheTTL(item), item.GetValue())
+		err = client.Send("SETEX", item.GetKey(), k.decideCacheTTL(item), item.GetValue())
+		if err != nil {
+			return err
+		}
 	}
 
-	_, err := client.Do("EXEC")
+	_, err = client.Do("EXEC")
 	return err
 }
 
@@ -353,13 +368,22 @@ func (k *keeper) StoreMultiPersist(items []Item) error {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	client.Send("MULTI")
+	err := client.Send("MULTI")
+	if err != nil {
+		return err
+	}
 	for _, item := range items {
-		client.Send("SET", item.GetKey(), item.GetValue())
-		client.Send("PERSIST", item.GetKey())
+		err = client.Send("SET", item.GetKey(), item.GetValue())
+		if err != nil {
+			return err
+		}
+		err = client.Send("PERSIST", item.GetKey())
+		if err != nil {
+			return err
+		}
 	}
 
-	_, err := client.Do("EXEC")
+	_, err = client.Do("EXEC")
 	return err
 }
 
@@ -385,12 +409,18 @@ func (k *keeper) ExpireMulti(items map[string]time.Duration) error {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	client.Send("MULTI")
+	err := client.Send("MULTI")
+	if err != nil {
+		return err
+	}
 	for k, duration := range items {
-		client.Send("EXPIRE", k, int64(duration.Seconds()))
+		err = client.Send("EXPIRE", k, int64(duration.Seconds()))
+		if err != nil {
+			return err
+		}
 	}
 
-	_, err := client.Do("EXEC")
+	_, err = client.Do("EXEC")
 	return err
 }
 
@@ -542,4 +572,99 @@ func getOffset(page, limit int64) int64 {
 		return 0
 	}
 	return offset
+}
+
+// StoreHashMember :nodoc:
+func (k *keeper) StoreHashMember(identifier string, c Item) (err error) {
+	if k.disableCaching {
+		return nil
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	err = client.Send("MULTI")
+	if err != nil {
+		return err
+	}
+	_, err = client.Do("HSET", identifier, c.GetKey(), c.GetValue())
+	if err != nil {
+		return err
+	}
+	_, err = client.Do("EXPIRE", identifier, k.decideCacheTTL(c))
+	if err != nil {
+		return err
+	}
+
+	_, err = client.Do("EXEC")
+	return
+}
+
+// GetOrLockHash :nodoc:
+func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem interface{}, mutex *redsync.Mutex, err error) {
+	if k.disableCaching {
+		return
+	}
+
+	cachedItem, err = k.GetHashMember(identifier, key)
+	if err != nil && err != redigo.ErrNil || cachedItem != nil {
+		return
+	}
+
+	mutex, err = k.AcquireLock(key)
+	if err == nil {
+		return
+	}
+
+	start := time.Now()
+	for {
+		b := &backoff.Backoff{
+			Min:    20 * time.Millisecond,
+			Max:    200 * time.Millisecond,
+			Jitter: true,
+		}
+
+		if !k.isLocked(identifier) {
+			cachedItem, err = k.GetHashMember(identifier, key)
+			if err != nil && err != redigo.ErrNil || cachedItem != nil {
+				return
+			}
+			return nil, nil, nil
+		}
+
+		elapsed := time.Since(start)
+		if elapsed >= k.waitTime {
+			break
+		}
+
+		time.Sleep(b.Duration())
+	}
+
+	return nil, nil, errors.New("wait too long")
+}
+
+// StoreHashMember :nodoc:
+func (k *keeper) GetHashMember(identifier string, key string) (value interface{}, err error) {
+	if k.disableCaching {
+		return
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	value, err = client.Do("HGET", identifier, key)
+	return
+}
+
+// DeleteHashMember :nodoc:
+func (k *keeper) DeleteHashMember(identifier string, key string) (err error) {
+	if k.disableCaching {
+		return
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	_, err = client.Do("HDEL", identifier, key)
+	return
 }
