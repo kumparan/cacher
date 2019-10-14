@@ -7,6 +7,7 @@ import (
 	"github.com/go-redsync/redsync"
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
+	"github.com/mna/redisc"
 )
 
 const (
@@ -43,8 +44,8 @@ type (
 		AcquireLock(string) (*redsync.Mutex, error)
 		SetDefaultTTL(time.Duration)
 		SetNilTTL(time.Duration)
-		SetConnectionPool(*redigo.Pool)
-		SetLockConnectionPool(*redigo.Pool)
+		SetConnectionPool(*redisc.Cluster)
+		SetLockConnectionPool(*redisc.Cluster)
 		SetLockDuration(time.Duration)
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
@@ -70,13 +71,13 @@ type (
 	}
 
 	keeper struct {
-		connPool       *redigo.Pool
+		connPool       *redisc.Cluster
 		nilTTL         time.Duration
 		defaultTTL     time.Duration
 		waitTime       time.Duration
 		disableCaching bool
 
-		lockConnPool *redigo.Pool
+		lockConnPool *redisc.Cluster
 		lockDuration time.Duration
 		lockTries    int
 	}
@@ -278,12 +279,12 @@ func (k *keeper) SetNilTTL(d time.Duration) {
 }
 
 // SetConnectionPool :nodoc:
-func (k *keeper) SetConnectionPool(c *redigo.Pool) {
+func (k *keeper) SetConnectionPool(c *redisc.Cluster) {
 	k.connPool = c
 }
 
 // SetLockConnectionPool :nodoc:
-func (k *keeper) SetLockConnectionPool(c *redigo.Pool) {
+func (k *keeper) SetLockConnectionPool(c *redisc.Cluster) {
 	k.lockConnPool = c
 }
 
