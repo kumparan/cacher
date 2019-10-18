@@ -22,6 +22,11 @@ const (
 var nilJSON = []byte("null")
 
 type (
+	// RedisPool :Cluster or redigo:
+	RedisPool interface {
+		Get() redigo.Conn
+		Close() error
+	}
 	// CacheGeneratorFn :nodoc:
 	CacheGeneratorFn func() (interface{}, error)
 
@@ -37,15 +42,16 @@ type (
 		StoreNil(cacheKey string) error
 		Expire(string, time.Duration) error
 		ExpireMulti(map[string]time.Duration) error
-		Purge(string) error
 		DeleteByKeys([]string) error
 		IncreaseCachedValueByOne(key string) error
 
 		AcquireLock(string) (*redsync.Mutex, error)
 		SetDefaultTTL(time.Duration)
 		SetNilTTL(time.Duration)
-		SetConnectionPool(*redisc.Cluster)
-		SetLockConnectionPool(*redisc.Cluster)
+		SetClusterConnectionPool(*redisc.Cluster)
+		SetLockClusterConnectionPool(*redisc.Cluster)
+		SetConnectionPool(*redigo.Pool)
+		SetLockConnectionPool(*redigo.Pool)
 		SetLockDuration(time.Duration)
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
@@ -71,13 +77,13 @@ type (
 	}
 
 	keeper struct {
-		connPool       *redisc.Cluster
+		connPool       RedisPool
 		nilTTL         time.Duration
 		defaultTTL     time.Duration
 		waitTime       time.Duration
 		disableCaching bool
 
-		lockConnPool *redisc.Cluster
+		lockConnPool RedisPool
 		lockDuration time.Duration
 		lockTries    int
 	}
@@ -213,48 +219,6 @@ func (k *keeper) StoreNil(cacheKey string) error {
 	return err
 }
 
-// Purge :nodoc:
-func (k *keeper) Purge(matchString string) error {
-	if k.disableCaching {
-		return nil
-	}
-
-	client := k.connPool.Get()
-	defer client.Close()
-
-	var cursor interface{}
-	var stop []uint8
-	cursor = "0"
-	delCount := 0
-	for {
-		res, err := redigo.Values(client.Do("SCAN", cursor, "MATCH", matchString, "COUNT", 500000))
-		if err != nil {
-			return err
-		}
-		stop = res[0].([]uint8)
-		if foundKeys, ok := res[1].([]interface{}); ok {
-			if len(foundKeys) > 0 {
-				err = client.Send("DEL", foundKeys...)
-				if err != nil {
-					return err
-				}
-				delCount++
-			}
-
-			// ascii for '0' is 48
-			if stop[0] == 48 {
-				break
-			}
-		}
-
-		cursor = res[0]
-	}
-	if delCount > 0 {
-		client.Flush()
-	}
-	return nil
-}
-
 // IncreaseCachedValueByOne will increments the number stored at key by one.
 // If the key does not exist, it is set to 0 before performing the operation
 func (k *keeper) IncreaseCachedValueByOne(key string) error {
@@ -278,14 +242,24 @@ func (k *keeper) SetNilTTL(d time.Duration) {
 	k.nilTTL = d
 }
 
+// SetClusterConnectionPool :nodoc:
+func (k *keeper) SetClusterConnectionPool(c *redisc.Cluster) {
+	k.connPool = RedisPool(c)
+}
+
+// SetLockClusterConnectionPool :nodoc:
+func (k *keeper) SetLockClusterConnectionPool(c *redisc.Cluster) {
+	k.lockConnPool = RedisPool(c)
+}
+
 // SetConnectionPool :nodoc:
-func (k *keeper) SetConnectionPool(c *redisc.Cluster) {
-	k.connPool = c
+func (k *keeper) SetConnectionPool(c *redigo.Pool) {
+	k.connPool = RedisPool(c)
 }
 
 // SetLockConnectionPool :nodoc:
-func (k *keeper) SetLockConnectionPool(c *redisc.Cluster) {
-	k.lockConnPool = c
+func (k *keeper) SetLockConnectionPool(c *redigo.Pool) {
+	k.lockConnPool = RedisPool(c)
 }
 
 // SetLockDuration :nodoc:
@@ -327,12 +301,20 @@ func (k *keeper) DeleteByKeys(keys []string) error {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	redisKeys := []interface{}{}
-	for _, key := range keys {
-		redisKeys = append(redisKeys, key)
+	err := client.Send("MULTI")
+	if err != nil {
+		return err
 	}
 
-	_, err := client.Do("DEL", redisKeys...)
+	for _, key := range keys {
+		_, err = client.Do("DEL", key)
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err = client.Do("EXEC")
+
 	return err
 }
 
