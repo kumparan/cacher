@@ -301,20 +301,12 @@ func (k *keeper) DeleteByKeys(keys []string) error {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	err := client.Send("MULTI")
-	if err != nil {
-		return err
-	}
-
+	redisKeys := []interface{}{}
 	for _, key := range keys {
-		_, err = client.Do("DEL", key)
-		if err != nil {
-			return err
-		}
+		redisKeys = append(redisKeys, key)
 	}
 
-	_, err = client.Do("EXEC")
-
+	_, err := client.Do("DEL", redisKeys...)
 	return err
 }
 

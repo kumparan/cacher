@@ -166,48 +166,6 @@ func TestGetOrSet(t *testing.T) {
 	})
 }
 
-func TestPurge(t *testing.T) {
-	// Initialize new cache keeper
-	k := NewKeeper()
-
-	m, err := miniredis.Run()
-	assert.NoError(t, err)
-
-	r := newRedisConn(m.Addr())
-	k.SetConnectionPool(r)
-	k.SetLockConnectionPool(r)
-
-	// It should purge keys match with the matchstring while leaving the rest untouched
-	testKeys := map[string]interface{}{
-		"story:1234:comment:4321": nil,
-		"story:1234:comment:4231": nil,
-		"story:1234:comment:4121": nil,
-		"story:1234:comment:4421": nil,
-		"story:1234:comment:4521": nil,
-		"story:1234:comment:4021": nil,
-		"story:2000:comment:3021": "anything",
-		"story:2000:comment:3421": "anything",
-		"story:2000:comment:3231": "anything",
-	}
-
-	for key := range testKeys {
-		_, mu, err := k.GetOrLock(key)
-		assert.NoError(t, err)
-
-		err = k.Store(mu, NewItem(key, "anything"))
-		assert.NoError(t, err)
-	}
-
-	err = k.Purge("story:1234:*")
-	assert.NoError(t, err)
-
-	for key, value := range testKeys {
-		res, _, err := k.GetOrLock(key)
-		assert.NoError(t, err)
-		assert.EqualValues(t, value, res)
-	}
-}
-
 func TestDecideCacheTTL(t *testing.T) {
 	k := &keeper{
 		defaultTTL:   defaultTTL,

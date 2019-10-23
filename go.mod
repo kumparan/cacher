@@ -12,3 +12,5 @@ require (
 	github.com/stretchr/testify v1.3.0
 	github.com/yuin/gopher-lua v0.0.0-20190206043414-8bfc7677f583 // indirect
 )
+
+go 1.13
