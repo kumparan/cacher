@@ -2,6 +2,7 @@ package cacher
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/go-redsync/redsync"
@@ -606,12 +607,14 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 		return
 	}
 
+	lockKey := fmt.Sprintf("%s:%s", identifier, key)
+
 	cachedItem, err = k.GetHashMember(identifier, key)
 	if err != nil && err != redigo.ErrNil || cachedItem != nil {
 		return
 	}
 
-	mutex, err = k.AcquireLock(key)
+	mutex, err = k.AcquireLock(lockKey)
 	if err == nil {
 		return
 	}
@@ -624,7 +627,7 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 			Jitter: true,
 		}
 
-		if !k.isLocked(identifier) {
+		if !k.isLocked(lockKey) {
 			cachedItem, err = k.GetHashMember(identifier, key)
 			if err != nil && err != redigo.ErrNil || cachedItem != nil {
 				return
