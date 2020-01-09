@@ -2,6 +2,7 @@ package cacher
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/go-redsync/redsync"
