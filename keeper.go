@@ -24,7 +24,7 @@ var nilJSON = []byte("null")
 type (
 	// RedisConnector :Cluster or Client:
 	RedisConnector interface {
-		TxPipeline() *goredis.Pipeliner
+		TxPipeline() goredis.Pipeliner
 
 		Get(key string) *goredis.StringCmd
 		Set(key string, value interface{}, expiration time.Duration) *goredis.StatusCmd
@@ -48,6 +48,7 @@ type (
 		Expire(key string, expiration time.Duration) *goredis.BoolCmd
 		Exists(keys ...string) *goredis.IntCmd
 		Do(args ...interface{}) *goredis.Cmd
+		Persist(key string) *goredis.BoolCmd
 	}
 
 	// CacheGeneratorFn :nodoc:
@@ -359,12 +360,12 @@ func (k *keeper) StoreMultiWithoutBlocking(items []Item) (err error) {
 	}
 
 	pipeline := k.connPool.TxPipeline()
-	// for _, item := range items {
-	// 	err = pipeline.Set(item.GetKey(), item.GetValue(), k.decideCacheTTL(item)).Err()
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// }
+	for _, item := range items {
+		err = pipeline.Set(item.GetKey(), item.GetValue(), k.decideCacheTTL(item)).Err()
+		if err != nil {
+			return err
+		}
+	}
 
 	_, err = pipeline.Exec()
 	return err
@@ -378,7 +379,7 @@ func (k *keeper) StoreMultiPersist(items []Item) (err error) {
 
 	pipeline := k.connPool.TxPipeline()
 	for _, item := range items {
-		err = pipeline.Set(item.GetKey(), item.GetValue()).Err()
+		err = pipeline.Set(item.GetKey(), item.GetValue(), 0).Err()
 		if err != nil {
 			return err
 		}
@@ -412,7 +413,7 @@ func (k *keeper) ExpireMulti(items map[string]time.Duration) (err error) {
 
 	pipeline := k.connPool.TxPipeline()
 	for k, duration := range items {
-		err = pipeline.Expire(k, int64(duration.Seconds()))
+		err = pipeline.Expire(k, duration).Err()
 		if err != nil {
 			return err
 		}
@@ -568,11 +569,11 @@ func (k *keeper) StoreHashMember(identifier string, c Item) (err error) {
 
 	pipeline := k.connPool.TxPipeline()
 
-	_, err = pipeline.HSet(identifier, c.GetKey(), c.GetValue())
+	_, err = pipeline.HSet(identifier, c.GetKey(), c.GetValue()).Result()
 	if err != nil {
 		return err
 	}
-	_, err = pipeline.Expire(identifier, k.decideCacheTTL(c))
+	_, err = pipeline.Expire(identifier, k.decideCacheTTL(c)).Result()
 	if err != nil {
 		return err
 	}
