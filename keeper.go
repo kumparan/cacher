@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	goredis "github.com/go-redis/redis"
 	"github.com/go-redsync/redsync"
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
@@ -44,8 +45,8 @@ type (
 		AcquireLock(string) (*redsync.Mutex, error)
 		SetDefaultTTL(time.Duration)
 		SetNilTTL(time.Duration)
-		SetConnectionPool(*redigo.Pool)
-		SetLockConnectionPool(*redigo.Pool)
+		SetConnectionPool(*goredis.UniversalClient)
+		SetLockConnectionPool(*goredis.UniversalClient)
 		SetLockDuration(time.Duration)
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
@@ -71,13 +72,13 @@ type (
 	}
 
 	keeper struct {
-		connPool       *redigo.Pool
+		connPool       *goredis.UniversalClient
 		nilTTL         time.Duration
 		defaultTTL     time.Duration
 		waitTime       time.Duration
 		disableCaching bool
 
-		lockConnPool *redigo.Pool
+		lockConnPool *goredis.UniversalClient
 		lockDuration time.Duration
 		lockTries    int
 	}
@@ -102,7 +103,7 @@ func (k *keeper) Get(key string) (cachedItem interface{}, err error) {
 	}
 
 	cachedItem, err = k.getCachedItem(key)
-	if err != nil && err != redigo.ErrNil || cachedItem != nil {
+	if err != nil && err != goredis.Nil || cachedItem != nil {
 		return
 	}
 
@@ -434,10 +435,7 @@ func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
 }
 
 func (k *keeper) getCachedItem(key string) (value interface{}, err error) {
-	client := k.connPool.Get()
-	defer client.Close()
-
-	return client.Do("GET", key)
+	return k.connPool.Get(key).Result()
 }
 
 func (k *keeper) isLocked(key string) bool {
