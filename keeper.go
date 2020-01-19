@@ -22,6 +22,34 @@ const (
 var nilJSON = []byte("null")
 
 type (
+	// RedisConnector :Cluster or Client:
+	RedisConnector interface {
+		TxPipeline() *goredis.Pipeliner
+
+		Get(key string) *goredis.StringCmd
+		Set(key string, value interface{}, expiration time.Duration) *goredis.StatusCmd
+		Incr(key string) *goredis.IntCmd
+		SetNX(key string, value interface{}, expiration time.Duration) *goredis.BoolCmd
+		Eval(script string, keys []string, args ...interface{}) *goredis.Cmd
+		EvalSha(sha1 string, keys []string, args ...interface{}) *goredis.Cmd
+		ScriptExists(scripts ...string) *goredis.BoolSliceCmd
+		ScriptLoad(script string) *goredis.StringCmd
+		Del(keys ...string) *goredis.IntCmd
+		HDel(key string, fields ...string) *goredis.IntCmd
+		HGet(key, field string) *goredis.StringCmd
+		HSet(key, field string, value interface{}) *goredis.BoolCmd
+		TTL(key string) *goredis.DurationCmd
+		RPush(key string, values ...interface{}) *goredis.IntCmd
+		RPop(key string) *goredis.StringCmd
+		LLen(key string) *goredis.IntCmd
+		LPop(key string) *goredis.StringCmd
+		LPush(key string, values ...interface{}) *goredis.IntCmd
+		LRange(key string, start, stop int64) *goredis.StringSliceCmd
+		Expire(key string, expiration time.Duration) *goredis.BoolCmd
+		Exists(keys ...string) *goredis.IntCmd
+		Do(args ...interface{}) *goredis.Cmd
+	}
+
 	// CacheGeneratorFn :nodoc:
 	CacheGeneratorFn func() (interface{}, error)
 
@@ -44,8 +72,8 @@ type (
 		AcquireLock(string) (*redislock.Lock, error)
 		SetDefaultTTL(time.Duration)
 		SetNilTTL(time.Duration)
-		SetConnectionPool(*goredis.UniversalClient)
-		SetLockConnectionPool(*goredis.UniversalClient)
+		SetConnectionPool(RedisConnector)
+		SetLockConnectionPool(RedisConnector)
 		SetLockDuration(time.Duration)
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
@@ -71,13 +99,13 @@ type (
 	}
 
 	keeper struct {
-		connPool       *goredis.UniversalClient
+		connPool       RedisConnector
 		nilTTL         time.Duration
 		defaultTTL     time.Duration
 		waitTime       time.Duration
 		disableCaching bool
 
-		lockConnPool *goredis.UniversalClient
+		lockConnPool RedisConnector
 		lockDuration time.Duration
 		lockTries    int
 	}
@@ -93,6 +121,45 @@ func NewKeeper() Keeper {
 		waitTime:       defaultWaitTime,
 		disableCaching: false,
 	}
+}
+
+// SetDefaultTTL :nodoc:
+func (k *keeper) SetDefaultTTL(d time.Duration) {
+	k.defaultTTL = d
+}
+
+func (k *keeper) SetNilTTL(d time.Duration) {
+	k.nilTTL = d
+}
+
+// SetConnectionPool :nodoc:
+func (k *keeper) SetConnectionPool(c RedisConnector) {
+	k.connPool = c
+}
+
+// SetLockConnectionPool :nodoc:
+func (k *keeper) SetLockConnectionPool(c RedisConnector) {
+	k.lockConnPool = c
+}
+
+// SetLockDuration :nodoc:
+func (k *keeper) SetLockDuration(d time.Duration) {
+	k.lockDuration = d
+}
+
+// SetLockTries :nodoc:
+func (k *keeper) SetLockTries(t int) {
+	k.lockTries = t
+}
+
+// SetWaitTime :nodoc:
+func (k *keeper) SetWaitTime(d time.Duration) {
+	k.waitTime = d
+}
+
+// SetDisableCaching :nodoc:
+func (k *keeper) SetDisableCaching(b bool) {
+	k.disableCaching = b
 }
 
 // Get :nodoc:
@@ -186,7 +253,7 @@ func (k *keeper) Store(mutex *redislock.Lock, c Item) error {
 	}
 	defer mutex.Release()
 
-	_, err := k.connPool.Set(c.GetKey(), c.GetValue(), k.decideCacheTTL(c))
+	err := k.connPool.Set(c.GetKey(), c.GetValue(), k.decideCacheTTL(c)).Err()
 	return err
 }
 
@@ -196,7 +263,7 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 		return nil
 	}
 
-	_, err := k.connPool.Set(c.GetKey(), c.GetValue(), k.decideCacheTTL(c))
+	_, err := k.connPool.Set(c.GetKey(), c.GetValue(), k.decideCacheTTL(c)).Result()
 	return err
 }
 
@@ -256,53 +323,14 @@ func (k *keeper) IncreaseCachedValueByOne(key string) error {
 		return nil
 	}
 
-	_, err := k.connPool.Incr(key)
+	_, err := k.connPool.Incr(key).Result()
 	return err
-}
-
-// SetDefaultTTL :nodoc:
-func (k *keeper) SetDefaultTTL(d time.Duration) {
-	k.defaultTTL = d
-}
-
-func (k *keeper) SetNilTTL(d time.Duration) {
-	k.nilTTL = d
-}
-
-// SetConnectionPool :nodoc:
-func (k *keeper) SetConnectionPool(c *goredis.UniversalClient) {
-	k.connPool = c
-}
-
-// SetLockConnectionPool :nodoc:
-func (k *keeper) SetLockConnectionPool(c *goredis.UniversalClient) {
-	k.lockConnPool = c
-}
-
-// SetLockDuration :nodoc:
-func (k *keeper) SetLockDuration(d time.Duration) {
-	k.lockDuration = d
-}
-
-// SetLockTries :nodoc:
-func (k *keeper) SetLockTries(t int) {
-	k.lockTries = t
-}
-
-// SetWaitTime :nodoc:
-func (k *keeper) SetWaitTime(d time.Duration) {
-	k.waitTime = d
-}
-
-// SetDisableCaching :nodoc:
-func (k *keeper) SetDisableCaching(b bool) {
-	k.disableCaching = b
 }
 
 // AcquireLock :nodoc:
 func (k *keeper) AcquireLock(key string) (*redislock.Lock, error) {
 	locker := redislock.New(k.lockConnPool)
-	lock, err := locker.Obtain("lock:"+key, k.lockDuration, redislock.Options{
+	lock, err := locker.Obtain("lock:"+key, k.lockDuration, &redislock.Options{
 		RetryStrategy: redislock.LimitRetry(redislock.LinearBackoff(100*time.Millisecond), k.lockTries),
 	})
 
@@ -315,44 +343,40 @@ func (k *keeper) DeleteByKeys(keys []string) error {
 		return nil
 	}
 
-	redisKeys := []interface{}{}
+	var redisKeys []string
 	for _, key := range keys {
 		redisKeys = append(redisKeys, key)
 	}
 
-	_, err := k.connPool.Del(redisKeys...)
+	_, err := k.connPool.Del(redisKeys...).Result()
 	return err
 }
 
 // StoreMultiWithoutBlocking Store multiple items
-func (k *keeper) StoreMultiWithoutBlocking(items []Item) error {
+func (k *keeper) StoreMultiWithoutBlocking(items []Item) (err error) {
 	if k.disableCaching {
 		return nil
 	}
 
-	client := k.connPool
-
-	pipeline := client.Pipeline()
-	for _, item := range items {
-		err = pipeline.Set(item.GetKey(), item.GetValue(), k.decideCacheTTL(item)).Err()
-		if err != nil {
-			return err
-		}
-	}
+	pipeline := k.connPool.TxPipeline()
+	// for _, item := range items {
+	// 	err = pipeline.Set(item.GetKey(), item.GetValue(), k.decideCacheTTL(item)).Err()
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	_, err = pipeline.Exec()
 	return err
 }
 
 // StoreMultiPersist Store multiple items with persistence
-func (k *keeper) StoreMultiPersist(items []Item) error {
+func (k *keeper) StoreMultiPersist(items []Item) (err error) {
 	if k.disableCaching {
 		return nil
 	}
 
-	client := k.connPool
-
-	pipeline := client.Pipeline()
+	pipeline := k.connPool.TxPipeline()
 	for _, item := range items {
 		err = pipeline.Set(item.GetKey(), item.GetValue()).Err()
 		if err != nil {
@@ -374,21 +398,19 @@ func (k *keeper) Expire(key string, duration time.Duration) (err error) {
 		return nil
 	}
 
-	client := k.connPool.Get()
+	client := k.connPool
 
-	_, err = client.Do("EXPIRE", key, int64(duration.Seconds()))
+	_, err = client.Expire(key, duration).Result()
 	return
 }
 
 // ExpireMulti Set expire multiple
-func (k *keeper) ExpireMulti(items map[string]time.Duration) error {
+func (k *keeper) ExpireMulti(items map[string]time.Duration) (err error) {
 	if k.disableCaching {
 		return nil
 	}
 
-	client := k.connPool
-
-	pipeline := client.Pipeline()
+	pipeline := k.connPool.TxPipeline()
 	for k, duration := range items {
 		err = pipeline.Expire(k, int64(duration.Seconds()))
 		if err != nil {
@@ -400,12 +422,13 @@ func (k *keeper) ExpireMulti(items map[string]time.Duration) error {
 	return err
 }
 
-func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
-	if ttl = c.GetTTLInt64(); ttl > 0 {
+func (k *keeper) decideCacheTTL(c Item) (ttl time.Duration) {
+	if intTTL := c.GetTTLInt64(); intTTL > 0 {
+		ttl = time.Duration(intTTL) * time.Second
 		return
 	}
 
-	return int64(k.defaultTTL.Seconds())
+	return k.defaultTTL
 }
 
 func (k *keeper) getCachedItem(key string) (value interface{}, err error) {
@@ -416,7 +439,7 @@ func (k *keeper) isLocked(key string) bool {
 	client := k.lockConnPool
 
 	reply, err := client.Get("lock:" + key).Result()
-	if err != nil || reply == nil {
+	if err != nil || reply == "" {
 		return false
 	}
 
@@ -428,10 +451,10 @@ func (k *keeper) CheckKeyExist(key string) (value bool, err error) {
 
 	client := k.connPool
 
-	val, err := client.Exists(key).Int64()
+	val, err := client.Exists(key).Result()
 
 	value = false
-	if val.(int64) > 0 {
+	if val > 0 {
 		value = true
 	}
 
@@ -442,7 +465,7 @@ func (k *keeper) CheckKeyExist(key string) (value bool, err error) {
 func (k *keeper) StoreRightList(name string, value interface{}) error {
 	client := k.connPool
 
-	_, err := client.RPush(name, value)
+	_, err := client.RPush(name, value).Result()
 
 	return err
 }
@@ -451,7 +474,7 @@ func (k *keeper) StoreRightList(name string, value interface{}) error {
 func (k *keeper) StoreLeftList(name string, value interface{}) error {
 	client := k.connPool
 
-	_, err := client.LPush(name, value)
+	_, err := client.LPush(name, value).Result()
 
 	return err
 }
@@ -459,8 +482,7 @@ func (k *keeper) StoreLeftList(name string, value interface{}) error {
 func (k *keeper) GetListLength(name string) (value int64, err error) {
 	client := k.connPool
 
-	val, err := client.LLen(name).Int64()
-	value = val.(int64)
+	value, err = client.LLen(name).Result()
 
 	return
 }
@@ -520,12 +542,12 @@ func (k *keeper) GetList(name string, size int64, page int64) (value interface{}
 func (k *keeper) GetTTL(name string) (value int64, err error) {
 	client := k.connPool
 
-	val, err := client.TTL(name).String()
+	val, err := client.TTL(name).Result()
 	if err != nil {
 		return
 	}
 
-	value = val.(int64)
+	value = int64(val.Seconds())
 	return
 }
 
@@ -544,9 +566,7 @@ func (k *keeper) StoreHashMember(identifier string, c Item) (err error) {
 		return nil
 	}
 
-	client := k.connPool
-
-	pipeline = client.Pipeline()
+	pipeline := k.connPool.TxPipeline()
 
 	_, err = pipeline.HSet(identifier, c.GetKey(), c.GetValue())
 	if err != nil {
@@ -626,6 +646,6 @@ func (k *keeper) DeleteHashMember(identifier string, key string) (err error) {
 
 	client := k.connPool
 
-	_, err = client.HDel(identifier, key)
+	_, err = client.HDel(identifier, key).Result()
 	return
 }
