@@ -3,6 +3,7 @@ module github.com/kumparan/cacher
 require (
 	github.com/alicebob/gopher-json v0.0.0-20180125190556-5a6b3ba71ee6 // indirect
 	github.com/alicebob/miniredis v2.5.0+incompatible
+	github.com/bsm/redislock v0.4.3
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/garyburd/redigo v1.6.0
 	github.com/go-redis/redis v6.15.6+incompatible
