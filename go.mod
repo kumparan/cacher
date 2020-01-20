@@ -1,4 +1,4 @@
-module github.com/kumparan/cacher
+module github.com/kumparan/cacher/v2
 
 require (
 	github.com/bsm/redislock v0.4.3
