@@ -170,7 +170,7 @@ func (k *keeper) Get(key string) (cachedItem interface{}, err error) {
 	}
 
 	cachedItem, err = k.getCachedItem(key)
-	if err != nil && err != goredis.Nil || cachedItem != nil {
+	if err != nil && err != goredis.Nil || cachedItem != "" {
 		return
 	}
 
@@ -184,7 +184,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redislock
 	}
 
 	cachedItem, err = k.getCachedItem(key)
-	if err != nil && err != goredis.Nil || cachedItem != nil {
+	if err != nil && err != goredis.Nil || cachedItem != "" {
 		return
 	}
 
@@ -203,7 +203,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redislock
 
 		if !k.isLocked(key) {
 			cachedItem, err = k.getCachedItem(key)
-			if err != nil && err != goredis.Nil || cachedItem != nil {
+			if err != nil && err != goredis.Nil || cachedItem != "" {
 				return
 			}
 			return nil, nil, nil
@@ -591,7 +591,7 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 	lockKey := fmt.Sprintf("%s:%s", identifier, key)
 
 	cachedItem, err = k.GetHashMember(identifier, key)
-	if err != nil && err != goredis.Nil || cachedItem != nil {
+	if err != nil && err != goredis.Nil || cachedItem != "" {
 		return
 	}
 
@@ -610,7 +610,7 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 
 		if !k.isLocked(lockKey) {
 			cachedItem, err = k.GetHashMember(identifier, key)
-			if err != nil && err != goredis.Nil || cachedItem != nil {
+			if err != nil && err != goredis.Nil || cachedItem != "" {
 				return
 			}
 			return nil, nil, nil
@@ -633,9 +633,7 @@ func (k *keeper) GetHashMember(identifier string, key string) (value interface{}
 		return
 	}
 
-	client := k.connPool
-
-	value, err = client.HGet(identifier, key).Result()
+	value, err = k.connPool.HGet(identifier, key).Result()
 	return
 }
 
