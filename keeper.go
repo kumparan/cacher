@@ -331,7 +331,7 @@ func (k *keeper) IncreaseCachedValueByOne(key string) error {
 // AcquireLock :nodoc:
 func (k *keeper) AcquireLock(key string) (*redislock.Lock, error) {
 	locker := redislock.New(k.lockConnPool)
-	lock, err := locker.Obtain("lock:"+key, k.lockDuration, &redislock.Options{
+	lock, err := locker.Obtain("{lock}:"+key, k.lockDuration, &redislock.Options{
 		RetryStrategy: redislock.LimitRetry(redislock.LinearBackoff(100*time.Millisecond), k.lockTries),
 	})
 
