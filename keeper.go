@@ -170,7 +170,7 @@ func (k *keeper) Get(key string) (cachedItem interface{}, err error) {
 	}
 
 	cachedItem, err = k.getCachedItem(key)
-	if err != nil && err != goredis.Nil || cachedItem != "" {
+	if err != nil && err != goredis.Nil || cachedItem != nil {
 		return
 	}
 
@@ -184,7 +184,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redislock
 	}
 
 	cachedItem, err = k.getCachedItem(key)
-	if err != nil && err != goredis.Nil || cachedItem != "" {
+	if err != nil && err != goredis.Nil || cachedItem != nil {
 		return
 	}
 
@@ -203,7 +203,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redislock
 
 		if !k.isLocked(key) {
 			cachedItem, err = k.getCachedItem(key)
-			if err != nil && err != goredis.Nil || cachedItem != "" {
+			if err != nil && err != goredis.Nil || cachedItem != nil {
 				return
 			}
 			return nil, nil, nil
@@ -252,7 +252,9 @@ func (k *keeper) Store(mutex *redislock.Lock, c Item) error {
 	if k.disableCaching {
 		return nil
 	}
-	defer mutex.Release()
+	defer func() {
+		_ = mutex.Release()
+	}()
 
 	err := k.connPool.Set(c.GetKey(), c.GetValue(), k.decideCacheTTL(c)).Err()
 	return err
@@ -331,7 +333,7 @@ func (k *keeper) IncreaseCachedValueByOne(key string) error {
 // AcquireLock :nodoc:
 func (k *keeper) AcquireLock(key string) (*redislock.Lock, error) {
 	locker := redislock.New(k.lockConnPool)
-	lock, err := locker.Obtain("{lock}:"+key, k.lockDuration, &redislock.Options{
+	lock, err := locker.Obtain("lock:"+key, k.lockDuration, &redislock.Options{
 		RetryStrategy: redislock.LimitRetry(redislock.LinearBackoff(100*time.Millisecond), k.lockTries),
 	})
 
@@ -368,6 +370,9 @@ func (k *keeper) StoreMultiWithoutBlocking(items []Item) (err error) {
 	}
 
 	_, err = pipeline.Exec()
+	defer func() {
+		err = pipeline.Close()
+	}()
 	return err
 }
 
@@ -390,6 +395,9 @@ func (k *keeper) StoreMultiPersist(items []Item) (err error) {
 	}
 
 	_, err = pipeline.Exec()
+	defer func() {
+		err = pipeline.Close()
+	}()
 	return err
 }
 
@@ -399,9 +407,7 @@ func (k *keeper) Expire(key string, duration time.Duration) (err error) {
 		return nil
 	}
 
-	client := k.connPool
-
-	_, err = client.Expire(key, duration).Result()
+	err = k.connPool.Expire(key, duration).Err()
 	return
 }
 
@@ -420,6 +426,9 @@ func (k *keeper) ExpireMulti(items map[string]time.Duration) (err error) {
 	}
 
 	_, err = pipeline.Exec()
+	defer func() {
+		err = pipeline.Close()
+	}()
 	return err
 }
 
@@ -433,13 +442,21 @@ func (k *keeper) decideCacheTTL(c Item) (ttl time.Duration) {
 }
 
 func (k *keeper) getCachedItem(key string) (value interface{}, err error) {
-	return k.connPool.Get(key).Result()
+	if k.disableCaching {
+		return
+	}
+	resp, err := k.connPool.Get(key).Result()
+	if resp == "" {
+		value = nil
+		return
+	}
+	value = []byte(resp)
+
+	return
 }
 
 func (k *keeper) isLocked(key string) bool {
-	client := k.lockConnPool
-
-	reply, err := client.Get("lock:" + key).Result()
+	reply, err := k.lockConnPool.Get("lock:" + key).Result()
 	if err != nil || reply == "" {
 		return false
 	}
@@ -449,10 +466,7 @@ func (k *keeper) isLocked(key string) bool {
 
 // CheckKeyExist :nodoc:
 func (k *keeper) CheckKeyExist(key string) (value bool, err error) {
-
-	client := k.connPool
-
-	val, err := client.Exists(key).Result()
+	val, err := k.connPool.Exists(key).Result()
 
 	value = false
 	if val > 0 {
@@ -464,33 +478,19 @@ func (k *keeper) CheckKeyExist(key string) (value bool, err error) {
 
 // StoreRightList :nodoc:
 func (k *keeper) StoreRightList(name string, value interface{}) error {
-	client := k.connPool
-
-	_, err := client.RPush(name, value).Result()
-
-	return err
+	return k.connPool.RPush(name, value).Err()
 }
 
 // StoreLeftList :nodoc:
 func (k *keeper) StoreLeftList(name string, value interface{}) error {
-	client := k.connPool
-
-	_, err := client.LPush(name, value).Result()
-
-	return err
+	return k.connPool.LPush(name, value).Err()
 }
 
 func (k *keeper) GetListLength(name string) (value int64, err error) {
-	client := k.connPool
-
-	value, err = client.LLen(name).Result()
-
-	return
+	return k.connPool.LLen(name).Result()
 }
 
 func (k *keeper) GetAndRemoveFirstListElement(name string) (value interface{}, err error) {
-	client := k.connPool
-
 	llen, err := k.GetListLength(name)
 	if err != nil {
 		return
@@ -500,13 +500,11 @@ func (k *keeper) GetAndRemoveFirstListElement(name string) (value interface{}, e
 		return
 	}
 
-	value, err = client.LPop(name).Result()
+	value, err = k.connPool.LPop(name).Result()
 	return
 }
 
 func (k *keeper) GetAndRemoveLastListElement(name string) (value interface{}, err error) {
-	client := k.connPool
-
 	llen, err := k.GetListLength(name)
 	if err != nil {
 		return
@@ -516,14 +514,12 @@ func (k *keeper) GetAndRemoveLastListElement(name string) (value interface{}, er
 		return
 	}
 
-	value, err = client.RPop(name).Result()
+	value, err = k.connPool.RPop(name).Result()
 	return
 }
 
 func (k *keeper) GetList(name string, size int64, page int64) (value interface{}, err error) {
 	offset := getOffset(page, size)
-
-	client := k.connPool
 
 	llen, err := k.GetListLength(name)
 	if err != nil {
@@ -536,14 +532,17 @@ func (k *keeper) GetList(name string, size int64, page int64) (value interface{}
 
 	end := offset + size
 
-	value, err = client.LRange(name, offset, end).Result()
+	resp, err := k.connPool.LRange(name, offset, end).Result()
+	if len(resp) == 0 {
+		value = nil
+		return
+	}
+	value = resp
 	return
 }
 
 func (k *keeper) GetTTL(name string) (value int64, err error) {
-	client := k.connPool
-
-	val, err := client.TTL(name).Result()
+	val, err := k.connPool.TTL(name).Result()
 	if err != nil {
 		return
 	}
@@ -569,16 +568,19 @@ func (k *keeper) StoreHashMember(identifier string, c Item) (err error) {
 
 	pipeline := k.connPool.TxPipeline()
 
-	_, err = pipeline.HSet(identifier, c.GetKey(), c.GetValue()).Result()
+	err = pipeline.HSet(identifier, c.GetKey(), c.GetValue()).Err()
 	if err != nil {
 		return err
 	}
-	_, err = pipeline.Expire(identifier, k.decideCacheTTL(c)).Result()
+	err = pipeline.Expire(identifier, k.decideCacheTTL(c)).Err()
 	if err != nil {
 		return err
 	}
 
 	_, err = pipeline.Exec()
+	defer func() {
+		err = pipeline.Close()
+	}()
 	return
 }
 
@@ -591,7 +593,7 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 	lockKey := fmt.Sprintf("%s:%s", identifier, key)
 
 	cachedItem, err = k.GetHashMember(identifier, key)
-	if err != nil && err != goredis.Nil || cachedItem != "" {
+	if err != nil && err != goredis.Nil || cachedItem != nil {
 		return
 	}
 
@@ -610,7 +612,7 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 
 		if !k.isLocked(lockKey) {
 			cachedItem, err = k.GetHashMember(identifier, key)
-			if err != nil && err != goredis.Nil || cachedItem != "" {
+			if err != nil && err != goredis.Nil || cachedItem != nil {
 				return
 			}
 			return nil, nil, nil
@@ -632,8 +634,12 @@ func (k *keeper) GetHashMember(identifier string, key string) (value interface{}
 	if k.disableCaching {
 		return
 	}
-
-	value, err = k.connPool.HGet(identifier, key).Result()
+	resp, err := k.connPool.HGet(identifier, key).Result()
+	if resp == "" {
+		value = nil
+		return
+	}
+	value = []byte(resp)
 	return
 }
 
@@ -643,8 +649,5 @@ func (k *keeper) DeleteHashMember(identifier string, key string) (err error) {
 		return
 	}
 
-	client := k.connPool
-
-	_, err = client.HDel(identifier, key).Result()
-	return
+	return k.connPool.HDel(identifier, key).Err()
 }
