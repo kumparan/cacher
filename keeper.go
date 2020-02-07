@@ -170,7 +170,7 @@ func (k *keeper) Get(key string) (cachedItem interface{}, err error) {
 	}
 
 	cachedItem, err = k.getCachedItem(key)
-	if err != nil && err != goredis.Nil || cachedItem != nil {
+	if err != nil || cachedItem != nil {
 		return
 	}
 
@@ -331,8 +331,7 @@ func (k *keeper) IncreaseCachedValueByOne(key string) error {
 
 // AcquireLock :nodoc:
 func (k *keeper) AcquireLock(key string) (*redislock.Lock, error) {
-	locker := redislock.New(k.lockConnPool)
-	lock, err := locker.Obtain("lock:"+key, k.lockDuration, nil)
+	lock, err := redislock.Obtain(k.lockConnPool, "lock:"+key, k.lockDuration, nil)
 
 	return lock, err
 }
@@ -359,6 +358,9 @@ func (k *keeper) StoreMultiWithoutBlocking(items []Item) (err error) {
 	}
 
 	pipeline := k.connPool.TxPipeline()
+	defer func() {
+		err = pipeline.Close()
+	}()
 	for _, item := range items {
 		err = pipeline.Set(item.GetKey(), item.GetValue(), k.decideCacheTTL(item)).Err()
 		if err != nil {
@@ -367,9 +369,6 @@ func (k *keeper) StoreMultiWithoutBlocking(items []Item) (err error) {
 	}
 
 	_, err = pipeline.Exec()
-	defer func() {
-		err = pipeline.Close()
-	}()
 	return err
 }
 
@@ -380,6 +379,9 @@ func (k *keeper) StoreMultiPersist(items []Item) (err error) {
 	}
 
 	pipeline := k.connPool.TxPipeline()
+	defer func() {
+		err = pipeline.Close()
+	}()
 	for _, item := range items {
 		err = pipeline.Set(item.GetKey(), item.GetValue(), 0).Err()
 		if err != nil {
@@ -392,9 +394,6 @@ func (k *keeper) StoreMultiPersist(items []Item) (err error) {
 	}
 
 	_, err = pipeline.Exec()
-	defer func() {
-		err = pipeline.Close()
-	}()
 	return err
 }
 
@@ -415,6 +414,9 @@ func (k *keeper) ExpireMulti(items map[string]time.Duration) (err error) {
 	}
 
 	pipeline := k.connPool.TxPipeline()
+	defer func() {
+		err = pipeline.Close()
+	}()
 	for k, duration := range items {
 		err = pipeline.Expire(k, duration).Err()
 		if err != nil {
@@ -423,9 +425,6 @@ func (k *keeper) ExpireMulti(items map[string]time.Duration) (err error) {
 	}
 
 	_, err = pipeline.Exec()
-	defer func() {
-		err = pipeline.Close()
-	}()
 	return err
 }
 
@@ -443,7 +442,7 @@ func (k *keeper) getCachedItem(key string) (value interface{}, err error) {
 		return
 	}
 	resp, err := k.connPool.Get(key).Result()
-	if resp == "" {
+	if resp == "" || err != nil {
 		value = nil
 		return
 	}
@@ -453,8 +452,8 @@ func (k *keeper) getCachedItem(key string) (value interface{}, err error) {
 }
 
 func (k *keeper) isLocked(key string) bool {
-	reply, err := k.lockConnPool.Get("lock:" + key).Result()
-	if err != nil || reply == "" {
+	reply, err := k.lockConnPool.Exists("lock:" + key).Result()
+	if err != nil || reply == 0 {
 		return false
 	}
 
@@ -564,6 +563,9 @@ func (k *keeper) StoreHashMember(identifier string, c Item) (err error) {
 	}
 
 	pipeline := k.connPool.TxPipeline()
+	defer func() {
+		err = pipeline.Close()
+	}()
 
 	err = pipeline.HSet(identifier, c.GetKey(), c.GetValue()).Err()
 	if err != nil {
@@ -575,9 +577,6 @@ func (k *keeper) StoreHashMember(identifier string, c Item) (err error) {
 	}
 
 	_, err = pipeline.Exec()
-	defer func() {
-		err = pipeline.Close()
-	}()
 	return
 }
 
@@ -632,7 +631,7 @@ func (k *keeper) GetHashMember(identifier string, key string) (value interface{}
 		return
 	}
 	resp, err := k.connPool.HGet(identifier, key).Result()
-	if resp == "" {
+	if resp == "" || err != nil {
 		value = nil
 		return
 	}
