@@ -629,10 +629,21 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 
 		if !k.isLocked(lockKey) {
 			cachedItem, err = k.GetHashMember(identifier, key)
-			if err != nil && err != redigo.ErrNil || cachedItem != nil {
+			switch {
+			// redis error, giving up
+			case err != nil && err != redigo.ErrNil:
+				return nil, nil, err
+			// cache not found, try to get another lock
+			case err == redigo.ErrNil || cachedItem == nil:
+				mutex, err = k.AcquireLock(lockKey)
+				if err == nil {
+					return
+				}
+				// can't acquire lock, let's keep waiting
+			// cache found, return it
+			default:
 				return
 			}
-			return nil, nil, nil
 		}
 
 		elapsed := time.Since(start)
