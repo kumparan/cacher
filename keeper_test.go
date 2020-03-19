@@ -676,6 +676,33 @@ func TestGetOrLock(t *testing.T) {
 		assert.True(t, d < (1*time.Second))
 		assert.NotEqual(t, mu1, mu2)
 	})
+
+	t.Run("locked got wait too long", func(t *testing.T) {
+		k := NewKeeper()
+		m, err := miniredis.Run()
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+		k.SetWaitTime(500 * time.Millisecond)
+
+		key := "walawaladumdum"
+
+		// lock it
+		_, err = k.AcquireLock(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		result, mu2, err := k.GetOrLock(key)
+		assert.Equal(t, ErrWaitTooLong, err)
+		assert.Nil(t, result)
+		assert.Nil(t, mu2)
+	})
 }
 
 func TestGetHashMemberOrLock(t *testing.T) {
@@ -793,5 +820,33 @@ func TestGetHashMemberOrLock(t *testing.T) {
 		assert.True(t, d >= (500*time.Millisecond))
 		assert.True(t, d < (1*time.Second))
 		assert.NotEqual(t, mu1, mu2)
+	})
+
+	t.Run("locked got wait too long", func(t *testing.T) {
+		k := NewKeeper()
+		m, err := miniredis.Run()
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+		k.SetWaitTime(500 * time.Millisecond)
+
+		id := "this-is-some-bucket"
+		key := "walawaladumdum"
+
+		// lock it
+		_, err = k.AcquireLock(fmt.Sprintf("%s:%s", id, key))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		result, mu2, err := k.GetHashMemberOrLock(id, key)
+		assert.Equal(t, ErrWaitTooLong, err)
+		assert.Nil(t, result)
+		assert.Nil(t, mu2)
 	})
 }
