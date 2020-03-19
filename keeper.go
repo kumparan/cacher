@@ -1,7 +1,6 @@
 package cacher
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -135,10 +134,21 @@ func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redsync.M
 
 		if !k.isLocked(key) {
 			cachedItem, err = k.getCachedItem(key)
-			if err != nil && err != redigo.ErrNil || cachedItem != nil {
-				return
+			switch {
+			// redis error, giving up
+			case err != nil && err != redigo.ErrNil:
+				return nil, nil, err
+			// cache not found, try to get another lock
+			case err == redigo.ErrNil || cachedItem == nil:
+				mutex, err = k.AcquireLock(key)
+				if err == nil {
+					return nil, mutex, nil
+				}
+				// can't acquire lock, let's keep waiting
+			// cache found, return it
+			default:
+				return cachedItem, nil, nil
 			}
-			return nil, nil, nil
 		}
 
 		elapsed := time.Since(start)
@@ -149,7 +159,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redsync.M
 		time.Sleep(b.Duration())
 	}
 
-	return nil, nil, errors.New("wait too long")
+	return nil, nil, ErrWaitTooLong
 }
 
 // GetOrSet :nodoc:
@@ -637,12 +647,12 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 			case err == redigo.ErrNil || cachedItem == nil:
 				mutex, err = k.AcquireLock(lockKey)
 				if err == nil {
-					return
+					return nil, mutex, nil
 				}
 				// can't acquire lock, let's keep waiting
 			// cache found, return it
 			default:
-				return
+				return cachedItem, nil, nil
 			}
 		}
 
@@ -654,7 +664,7 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 		time.Sleep(b.Duration())
 	}
 
-	return nil, nil, errors.New("wait too long")
+	return nil, nil, ErrWaitTooLong
 }
 
 // StoreHashMember :nodoc:
