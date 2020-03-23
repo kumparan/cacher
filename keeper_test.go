@@ -2,12 +2,10 @@ package cacher
 
 import (
 	"encoding/json"
-	"testing"
-	"time"
-
-	"github.com/garyburd/redigo/redis"
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/stretchr/testify/assert"
+	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis"
 )
@@ -450,7 +448,7 @@ func TestGetLockStoreRightLeftList(t *testing.T) {
 	assert.NoError(t, err)
 
 	res2, err2 := k.GetList(name, 2, 1)
-	resultList, _ := redis.Strings(res2, nil)
+	resultList, _ := redigo.Strings(res2, nil)
 	assert.EqualValues(t, multiList, resultList)
 	assert.NoError(t, err2)
 
@@ -480,12 +478,12 @@ func TestGetAndRemoveFirstAndLastListElement(t *testing.T) {
 	assert.NoError(t, err)
 
 	res3, err3 := k.GetAndRemoveFirstListElement(name)
-	firstElement, _ := redis.String(res3, nil)
+	firstElement, _ := redigo.String(res3, nil)
 	assert.EqualValues(t, firstElement, "test-response")
 	assert.NoError(t, err3)
 
 	res4, err4 := k.GetAndRemoveLastListElement(name)
-	lastElement, _ := redis.String(res4, nil)
+	lastElement, _ := redigo.String(res4, nil)
 	assert.EqualValues(t, lastElement, "test-response-3")
 	assert.NoError(t, err4)
 
