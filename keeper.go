@@ -276,48 +276,6 @@ func (k *keeper) StoreNil(cacheKey string) error {
 	return err
 }
 
-// Purge :nodoc:
-// func (k *keeper) Purge(matchString string) error {
-// 	if k.disableCaching {
-// 		return nil
-// 	}
-
-// 	client := k.connPool.Get()
-//
-
-// 	var cursor interface{}
-// 	var stop []uint8
-// 	cursor = "0"
-// 	delCount := 0
-// 	for {
-// 		res, err := redigo.Values(client.Do("SCAN", cursor, "MATCH", matchString, "COUNT", 500000))
-// 		if err != nil {
-// 			return err
-// 		}
-// 		stop = res[0].([]uint8)
-// 		if foundKeys, ok := res[1].([]interface{}); ok {
-// 			if len(foundKeys) > 0 {
-// 				err = client.Send("DEL", foundKeys...)
-// 				if err != nil {
-// 					return err
-// 				}
-// 				delCount++
-// 			}
-
-// 			// ascii for '0' is 48
-// 			if stop[0] == 48 {
-// 				break
-// 			}
-// 		}
-
-// 		cursor = res[0]
-// 	}
-// 	if delCount > 0 {
-// 		client.Flush()
-// 	}
-// 	return nil
-// }
-
 // IncreaseCachedValueByOne will increments the number stored at key by one.
 // If the key does not exist, it is set to 0 before performing the operation
 func (k *keeper) IncreaseCachedValueByOne(key string) error {
