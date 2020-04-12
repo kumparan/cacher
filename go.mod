@@ -1,5 +1,7 @@
 module github.com/kumparan/cacher/v2
 
+go 1.12
+
 require (
 	github.com/alicebob/gopher-json v0.0.0-20180125190556-5a6b3ba71ee6 // indirect
 	github.com/alicebob/miniredis v2.5.0+incompatible

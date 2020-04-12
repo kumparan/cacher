@@ -1,7 +1,6 @@
 package cacher
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -203,10 +202,21 @@ func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redislock
 
 		if !k.isLocked(key) {
 			cachedItem, err = k.getCachedItem(key)
-			if err != nil || cachedItem != nil {
-				return
+			switch {
+			// redis error, giving up
+			case err != nil && err != goredis.Nil:
+				return nil, nil, err
+			// cache not found, try to get another lock
+			case err == goredis.Nil || cachedItem == nil:
+				mutex, err = k.AcquireLock(key)
+				if err == nil {
+					return nil, mutex, nil
+				}
+				// can't acquire lock, let's keep waiting
+			// cache found, return it
+			default:
+				return cachedItem, nil, nil
 			}
-			return nil, nil, nil
 		}
 
 		elapsed := time.Since(start)
@@ -217,7 +227,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redislock
 		time.Sleep(b.Duration())
 	}
 
-	return nil, nil, errors.New("wait too long")
+	return nil, nil, ErrWaitTooLong
 }
 
 // GetOrSet :nodoc:
@@ -574,10 +584,21 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 
 		if !k.isLocked(lockKey) {
 			cachedItem, err = k.GetHashMember(identifier, key)
-			if err != nil || cachedItem != nil {
-				return
+			switch {
+			// redis error, giving up
+			case err != nil && err != goredis.Nil:
+				return nil, nil, err
+			// cache not found, try to get another lock
+			case err == goredis.Nil || cachedItem == nil:
+				mutex, err = k.AcquireLock(key)
+				if err == nil {
+					return nil, mutex, nil
+				}
+				// can't acquire lock, let's keep waiting
+			// cache found, return it
+			default:
+				return cachedItem, nil, nil
 			}
-			return nil, nil, nil
 		}
 
 		elapsed := time.Since(start)
@@ -588,7 +609,7 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 		time.Sleep(b.Duration())
 	}
 
-	return nil, nil, errors.New("wait too long")
+	return nil, nil, ErrWaitTooLong
 }
 
 // StoreHashMember :nodoc:
