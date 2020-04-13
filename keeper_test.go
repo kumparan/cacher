@@ -1,6 +1,7 @@
 package cacher
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -108,6 +109,9 @@ func TestKeeper_GetOrLock(t *testing.T) {
 		if res != nil {
 			t.Fatal("result should be nil")
 		}
+		if err := lock.Release(); err != nil {
+			t.Fatal(err)
+		}
 	})
 
 	t.Run("wait to getting lock", func(t *testing.T) {
@@ -152,6 +156,72 @@ func TestKeeper_GetOrLock(t *testing.T) {
 		}
 
 		<-doneCh
+	})
+
+	t.Run("locked got nil, then acquire lock", func(t *testing.T) {
+		keeper := newTestKeeper()
+		key := "test-get-or-lock-but-nil"
+		lockKey := "lock:" + key
+		cmd := client.Set(lockKey, []byte("test"), 500*time.Millisecond)
+		if cmd.Err() != nil {
+			t.Fatal(cmd.Err())
+		}
+
+		doneCh := make(chan struct{})
+		go func() {
+			defer close(doneCh)
+			res, lock, err := keeper.GetOrLock(key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if lock == nil {
+				t.Fatal("should getting the new lock")
+			}
+			if res != nil {
+				t.Fatal("result should be nil")
+			}
+
+			if err := lock.Release(); err != nil {
+				t.Fatal("should not error")
+			}
+		}()
+
+		// delete the lock key, but not set a value to the key
+		delCmd := client.Del(lockKey)
+		if delCmd.Err() != nil {
+			t.Fatal("should not error")
+		}
+
+		<-doneCh
+	})
+
+	t.Run("error wait too long", func(t *testing.T) {
+		keeper := newTestKeeper()
+		keeper.SetWaitTime(100 * time.Millisecond)
+		key := "test-get-or-lock-but-error-wait-too-ling"
+		lockKey := "lock:" + key
+
+		cmd := client.Set(lockKey, []byte("test"), 200*time.Millisecond)
+		if cmd.Err() != nil {
+			t.Fatal(cmd.Err())
+		}
+
+		res, lock, err := keeper.GetOrLock(key)
+		if err == nil {
+			t.Fatal("should error")
+		}
+
+		if err != ErrWaitTooLong {
+			t.Fatal("should error wait too long")
+		}
+
+		if lock != nil {
+			t.Fatal("should be nil")
+		}
+
+		if res != nil {
+			t.Fatal("should be nil")
+		}
 	})
 }
 
@@ -289,10 +359,10 @@ func TestKeeper_GetHashMemberOrLock(t *testing.T) {
 	t.Run("wait to getting lock", func(t *testing.T) {
 		keeper := newTestKeeper()
 		bucket := "test-bucket"
-		key := "test-get-or-lock"
-		lock := "lock:" + bucket + ":" + key
+		key := "test-get-or-lockKey"
+		lockKey := fmt.Sprintf("lockKey:%s:%s", bucket, key)
 
-		cmd := client.Set(lock, []byte("test"), 500*time.Millisecond)
+		cmd := client.Set(lockKey, []byte("test"), 500*time.Millisecond)
 		if cmd.Err() != nil {
 			t.Fatal(cmd.Err())
 		}
@@ -324,18 +394,87 @@ func TestKeeper_GetHashMemberOrLock(t *testing.T) {
 			t.Fatal(hsetCmd.Err())
 		}
 
-		dumpCmd := client.Del(lock)
+		dumpCmd := client.Del(lockKey)
 		if dumpCmd.Err() != nil {
 			t.Fatal(dumpCmd.Err())
 		}
 
 		<-doneCh
 	})
+
+	t.Run("locked got nil, then acquire lock", func(t *testing.T) {
+		keeper := newTestKeeper()
+		key := "test-get-or-lock-but-nil"
+		bucket := "test-hash-lock-got-nil-bucket"
+		lockKey := fmt.Sprintf("lock:%s:%s", bucket, key)
+
+		cmd := client.Set(lockKey, []byte("test"), 500*time.Millisecond)
+		if cmd.Err() != nil {
+			t.Fatal(cmd.Err())
+		}
+
+		doneCh := make(chan struct{})
+		go func() {
+			defer close(doneCh)
+			res, lock, err := keeper.GetHashMemberOrLock(bucket, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if lock == nil {
+				t.Fatal("should getting the new lock")
+			}
+			if res != nil {
+				t.Fatal("result should be nil")
+			}
+
+			if err := lock.Release(); err != nil {
+				t.Fatal("should not error")
+			}
+		}()
+
+		// delete the lock key, but not set a value to the key
+		delCmd := client.Del(lockKey)
+		if delCmd.Err() != nil {
+			t.Fatal("should not error")
+		}
+
+		<-doneCh
+	})
+
+	t.Run("error wait too long", func(t *testing.T) {
+		keeper := newTestKeeper()
+		keeper.SetWaitTime(100 * time.Millisecond)
+		key := "test-get-or-lock-but-error-wait-too-ling"
+		bucket := "test-hash-error-wait-too-long-bucket"
+		lockKey := fmt.Sprintf("lock:%s:%s", bucket, key)
+
+		cmd := client.Set(lockKey, []byte("test"), 200*time.Millisecond)
+		if cmd.Err() != nil {
+			t.Fatal(cmd.Err())
+		}
+
+		res, lock, err := keeper.GetHashMemberOrLock(bucket, key)
+		if err == nil {
+			t.Fatal("should error")
+		}
+
+		if err != ErrWaitTooLong {
+			t.Fatal("should error wait too long")
+		}
+
+		if lock != nil {
+			t.Fatal("should be nil")
+		}
+
+		if res != nil {
+			t.Fatal("should be nil")
+		}
+	})
 }
 
 func TestKeeper_DeleteHashMember(t *testing.T) {
 	keeper := newTestKeeper()
-	bucket := "test-bucket"
+	bucket := "test-bucket-hash-member"
 	key1 := "test-get-or-lock"
 	key2 := "test-get-or-lock-2"
 
@@ -359,13 +498,9 @@ func TestKeeper_DeleteHashMember(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bCmd := client.Exists(bucket)
-	if bCmd.Err() != nil {
-		t.Fatal(bCmd.Err())
-	}
-
-	if bCmd.Val() != 0 {
-		t.Fatal("should be 0")
+	bCmd := client.HGet(bucket, key2)
+	if bCmd.Err() == nil || bCmd.Err() != redis.Nil {
+		t.Fatal("should be error and nil error")
 	}
 }
 
