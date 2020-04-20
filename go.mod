@@ -9,6 +9,7 @@ require (
 	github.com/go-redsync/redsync v1.1.1
 	github.com/gomodule/redigo v2.0.0+incompatible
 	github.com/jpillora/backoff v0.0.0-20180909062703-3050d21c67d7
-	github.com/stretchr/testify v1.3.0
+	github.com/stretchr/testify v1.5.1
 	github.com/yuin/gopher-lua v0.0.0-20190206043414-8bfc7677f583 // indirect
+	gopkg.in/yaml.v2 v2.2.4 // indirect
 )
