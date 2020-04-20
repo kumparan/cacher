@@ -115,7 +115,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redsync.M
 	}
 
 	cachedItem, err = k.getCachedItem(key)
-	if err != nil && err != redigo.ErrNil || cachedItem != nil {
+	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
 		return
 	}
 
@@ -134,23 +134,21 @@ func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redsync.M
 
 		if !k.isLocked(key) {
 			cachedItem, err = k.getCachedItem(key)
-			switch {
-			// redis error, giving up
-			case err != nil && err != redigo.ErrNil:
-				return nil, nil, err
-			// cache not found, try to get another lock
-			case err == redigo.ErrNil || cachedItem == nil:
-				mutex, err = k.AcquireLock(key)
-				if err == nil {
-					return nil, mutex, nil
+			if err != nil {
+				if err == ErrKeyNotExist {
+					mutex, err = k.AcquireLock(key)
+					if err == nil {
+						return nil, mutex, nil
+					} else {
+						goto Wait
+					}
 				}
-				// can't acquire lock, let's keep waiting
-			// cache found, return it
-			default:
-				return cachedItem, nil, nil
+				return nil, nil, err
 			}
+			return cachedItem, nil, nil
 		}
 
+	Wait:
 		elapsed := time.Since(start)
 		if elapsed >= k.waitTime {
 			break
@@ -447,7 +445,28 @@ func (k *keeper) getCachedItem(key string) (value interface{}, err error) {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	return client.Do("GET", key)
+	err = client.Send("MULTI")
+	if err != nil {
+		return nil, err
+	}
+	err = client.Send("EXISTS", key)
+	if err != nil {
+		return nil, err
+	}
+	err = client.Send("GET", key)
+	if err != nil {
+		return nil, err
+	}
+	res, err := redigo.Values(client.Do("EXEC"))
+	if err != nil {
+		return nil, err
+	}
+
+	if res[0].(int64) <= 0 {
+		return nil, ErrKeyNotExist
+	}
+
+	return res[1], nil
 }
 
 func (k *keeper) isLocked(key string) bool {
@@ -620,7 +639,7 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 	lockKey := fmt.Sprintf("%s:%s", identifier, key)
 
 	cachedItem, err = k.GetHashMember(identifier, key)
-	if err != nil && err != redigo.ErrNil || cachedItem != nil {
+	if err != nil && err != redigo.ErrNil && err != ErrKeyNotExist || cachedItem != nil {
 		return
 	}
 
@@ -639,23 +658,21 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 
 		if !k.isLocked(lockKey) {
 			cachedItem, err = k.GetHashMember(identifier, key)
-			switch {
-			// redis error, giving up
-			case err != nil && err != redigo.ErrNil:
-				return nil, nil, err
-			// cache not found, try to get another lock
-			case err == redigo.ErrNil || cachedItem == nil:
-				mutex, err = k.AcquireLock(lockKey)
-				if err == nil {
-					return nil, mutex, nil
+			if err != nil {
+				if err == ErrKeyNotExist {
+					mutex, err = k.AcquireLock(lockKey)
+					if err == nil {
+						return nil, mutex, nil
+					} else {
+						goto Wait
+					}
 				}
-				// can't acquire lock, let's keep waiting
-			// cache found, return it
-			default:
-				return cachedItem, nil, nil
+				return nil, nil, err
 			}
+			return cachedItem, nil, nil
 		}
 
+	Wait:
 		elapsed := time.Since(start)
 		if elapsed >= k.waitTime {
 			break
@@ -676,8 +693,28 @@ func (k *keeper) GetHashMember(identifier string, key string) (value interface{}
 	client := k.connPool.Get()
 	defer client.Close()
 
-	value, err = client.Do("HGET", identifier, key)
-	return
+	err = client.Send("MULTI")
+	if err != nil {
+		return nil, err
+	}
+	err = client.Send("HEXISTS", identifier, key)
+	if err != nil {
+		return nil, err
+	}
+	err = client.Send("HGET", identifier, key)
+	if err != nil {
+		return nil, err
+	}
+	res, err := redigo.Values(client.Do("EXEC"))
+	if err != nil {
+		return nil, err
+	}
+
+	if res[0].(int64) <= 0 {
+		return nil, ErrKeyNotExist
+	}
+
+	return res[1], nil
 }
 
 // DeleteHashMember :nodoc:

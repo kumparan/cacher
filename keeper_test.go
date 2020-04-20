@@ -77,7 +77,7 @@ func TestGet(t *testing.T) {
 	t.Run("Not Exist", func(t *testing.T) {
 		assert.False(t, m.Exists(testKey))
 		result, err := k.Get(testKey)
-		assert.NoError(t, err)
+		assert.EqualError(t, ErrKeyNotExist, err.Error())
 		assert.Nil(t, result)
 	})
 
