@@ -139,6 +139,8 @@ func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redsync.M
 					mutex, err = k.AcquireLock(key)
 					if err == nil {
 						return nil, mutex, nil
+					} else {
+						goto Wait
 					}
 				}
 				return nil, nil, err
@@ -146,6 +148,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redsync.M
 			return cachedItem, nil, nil
 		}
 
+	Wait:
 		elapsed := time.Since(start)
 		if elapsed >= k.waitTime {
 			break
@@ -660,6 +663,8 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 					mutex, err = k.AcquireLock(lockKey)
 					if err == nil {
 						return nil, mutex, nil
+					} else {
+						goto Wait
 					}
 				}
 				return nil, nil, err
@@ -667,6 +672,7 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 			return cachedItem, nil, nil
 		}
 
+	Wait:
 		elapsed := time.Since(start)
 		if elapsed >= k.waitTime {
 			break
