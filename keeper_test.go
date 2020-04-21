@@ -77,7 +77,7 @@ func TestGet(t *testing.T) {
 	t.Run("Not Exist", func(t *testing.T) {
 		assert.False(t, m.Exists(testKey))
 		result, err := k.Get(testKey)
-		assert.EqualError(t, ErrKeyNotExist, err.Error())
+		assert.NoError(t, err)
 		assert.Nil(t, result)
 	})
 
@@ -558,6 +558,30 @@ func TestStoreNil(t *testing.T) {
 	assert.NoError(t, err)
 
 	reply, mu, err := k.GetOrLock(testKey)
+
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("null"), reply)
+	assert.Nil(t, mu)
+}
+
+func TestStoreHashNilMember(t *testing.T) {
+	k := NewKeeper()
+	m, err := miniredis.Run()
+
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+	k.SetWaitTime(1 * time.Second)
+
+	identifier := "identifier"
+	testKey := "test-key"
+
+	err = k.StoreHashNilMember(identifier, testKey)
+	assert.NoError(t, err)
+
+	reply, mu, err := k.GetHashMemberOrLock(identifier, testKey)
 
 	assert.NoError(t, err)
 	assert.Equal(t, []byte("null"), reply)
