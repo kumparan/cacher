@@ -65,6 +65,7 @@ type (
 		// HASH BUCKET
 		GetHashMemberOrLock(identifier string, key string) (interface{}, *redsync.Mutex, error)
 		StoreHashMember(string, Item) error
+		StoreHashNilMember(identifier, cacheKey string) error
 		GetHashMember(identifier string, key string) (interface{}, error)
 		DeleteHashMember(identifier string, key string) error
 	}
@@ -218,6 +219,13 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 func (k *keeper) StoreNil(cacheKey string) error {
 	item := NewItemWithCustomTTL(cacheKey, nilJSON, k.nilTTL)
 	err := k.StoreWithoutBlocking(item)
+	return err
+}
+
+// StoreHashNilMember :nodoc:
+func (k *keeper) StoreHashNilMember(identifier, cacheKey string) error {
+	item := NewItemWithCustomTTL(cacheKey, nilJSON, k.nilTTL)
+	err := k.StoreHashMember(identifier, item)
 	return err
 }
 
