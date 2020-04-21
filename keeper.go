@@ -101,7 +101,7 @@ func (k *keeper) Get(key string) (cachedItem interface{}, err error) {
 	}
 
 	cachedItem, err = k.getCachedItem(key)
-	if err != nil && err != redigo.ErrNil || cachedItem != nil {
+	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
 		return
 	}
 
