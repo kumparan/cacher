@@ -193,7 +193,11 @@ func (k *keeper) Store(mutex *redsync.Mutex, c Item) error {
 	if k.disableCaching {
 		return nil
 	}
-	defer mutex.Unlock()
+	defer func() {
+		if mutex != nil {
+			mutex.Unlock()
+		}
+	}()
 
 	client := k.connPool.Get()
 	defer client.Close()
