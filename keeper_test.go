@@ -899,3 +899,28 @@ func TestIncreaseHashMemberValue(t *testing.T) {
 
 	assert.EqualValues(t, 5, count)
 }
+
+func TestGetHashKeys(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	bucketKey := "bucket-test"
+	err = k.StoreHashMember(bucketKey, NewItem("key1", "haha"))
+	assert.NoError(t, err)
+
+	err = k.StoreHashMember(bucketKey, NewItem("key2", "hehe"))
+	assert.NoError(t, err)
+
+	keys, err := k.GetHashKeys(bucketKey)
+	assert.NoError(t, err)
+
+	assert.EqualValues(t, 2, len(keys))
+	assert.EqualValues(t, "key2", keys[1])
+}

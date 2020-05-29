@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/go-redsync/redsync"
+	"github.com/gomodule/redigo/redis"
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
 )
@@ -69,6 +70,7 @@ type (
 		GetHashMember(identifier string, key string) (interface{}, error)
 		DeleteHashMember(identifier string, key string) error
 		IncreaseHashMemberValue(identifier, key string, value int64) (int64, error)
+		GetHashKeys(identifier string) ([]string, error)
 	}
 
 	keeper struct {
@@ -751,11 +753,27 @@ func (k *keeper) IncreaseHashMemberValue(identifier, key string, value int64) (i
 	client := k.connPool.Get()
 	defer client.Close()
 
+	var count int64
 	rep, err := client.Do("HINCRBY", identifier, key, value)
 	if val, ok := rep.(int64); ok {
-		fmt.Println(string(val))
-		return val, nil
+		count = val
 	}
 
-	return 0, err
+	return count, err
+}
+
+func (k *keeper) GetHashKeys(identifier string) ([]string, error) {
+	if k.disableCaching {
+		return nil, nil
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	rep, err := redis.Strings(client.Do("HKEYS", identifier))
+	if err != nil {
+		return nil, err
+	}
+
+	return rep, err
 }
