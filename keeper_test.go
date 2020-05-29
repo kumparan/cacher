@@ -894,8 +894,8 @@ func TestIncreaseHashMemberValue(t *testing.T) {
 	err = k.Store(mu, NewItem(testKey, 0))
 	assert.NoError(t, err)
 
-	count, err := k.IncreaseHashMemberValue(bucketKey, testKey, 1)
+	count, err := k.IncreaseHashMemberValue(bucketKey, testKey, 5)
 	assert.NoError(t, err)
 
-	assert.EqualValues(t, 1, count)
+	assert.EqualValues(t, 5, count)
 }
