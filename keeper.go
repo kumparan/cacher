@@ -68,6 +68,7 @@ type (
 		StoreHashNilMember(identifier, cacheKey string) error
 		GetHashMember(identifier string, key string) (interface{}, error)
 		DeleteHashMember(identifier string, key string) error
+		IncreaseHashMemberValue(identifier, key string, value int64) (int64, error)
 	}
 
 	keeper struct {
@@ -740,4 +741,21 @@ func (k *keeper) DeleteHashMember(identifier string, key string) (err error) {
 
 	_, err = client.Do("HDEL", identifier, key)
 	return
+}
+
+func (k *keeper) IncreaseHashMemberValue(identifier, key string, value int64) (int64, error) {
+	if k.disableCaching {
+		return 0, nil
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	rep, err := client.Do("HINCRBY", identifier, key, value)
+	if val, ok := rep.(int64); ok {
+		fmt.Println(string(val))
+		return val, nil
+	}
+
+	return 0, err
 }

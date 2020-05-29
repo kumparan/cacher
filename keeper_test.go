@@ -874,3 +874,28 @@ func TestGetHashMemberOrLock(t *testing.T) {
 		assert.Nil(t, mu2)
 	})
 }
+
+func TestIncreaseHashMemberValue(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	testKey := "increase-test"
+	bucketKey := "bucket-test"
+	_, mu, err := k.GetHashMemberOrLock(bucketKey, testKey)
+	assert.NoError(t, err)
+
+	err = k.Store(mu, NewItem(testKey, 0))
+	assert.NoError(t, err)
+
+	count, err := k.IncreaseHashMemberValue(bucketKey, testKey, 1)
+	assert.NoError(t, err)
+
+	assert.EqualValues(t, 1, count)
+}
