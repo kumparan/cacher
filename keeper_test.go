@@ -941,6 +941,28 @@ func TestGetHashMemberThenDelete(t *testing.T) {
 	assert.EqualValues(t, len(keys), 1)
 }
 
+func TestGetHashMemberThenDelete_Empty(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	defer m.Close()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	// when the bucket is empty
+	bucketKey := "bucket-test"
+	assert.False(t, m.Exists(bucketKey))
+
+	// and call GetHashMemberThenDelete
+	rep, err := k.GetHashMemberThenDelete(bucketKey, "key1")
+	assert.NoError(t, err)
+	assert.Nil(t, rep)
+}
+
 func TestHashScan(t *testing.T) {
 	// Initialize new cache keeper
 	k := NewKeeper()

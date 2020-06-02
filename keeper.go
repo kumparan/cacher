@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/go-redsync/redsync"
-	"github.com/gomodule/redigo/redis"
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
 )
@@ -789,7 +788,11 @@ func (k *keeper) GetHashMemberThenDelete(identifier string, key string) (interfa
 		return nil, err
 	}
 
-	rep, err := redis.Values(client.Do("EXEC"))
+	rep, err := redigo.Values(client.Do("EXEC"))
+	if err != nil {
+		return nil, err
+	}
+
 	return rep[0], nil
 }
 
@@ -802,7 +805,7 @@ func (k *keeper) HashScan(identifier string, curor int64) (next int64, reps []st
 	client := k.connPool.Get()
 	defer client.Close()
 
-	rep, err := redis.Values(client.Do("HSCAN", identifier, curor))
+	rep, err := redigo.Values(client.Do("HSCAN", identifier, curor))
 	return parseScanResults(rep)
 }
 
