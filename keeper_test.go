@@ -630,3 +630,40 @@ func TestKeeper_StoreMultiWithoutBlocking(t *testing.T) {
 		t.Fatal("should be 1")
 	}
 }
+
+func TestKeeper_Persist(t *testing.T) {
+	keeper := newTestKeeper()
+	i := &item{
+		key:   "tobe-persist",
+		ttl:   defaultTTL,
+		value: []byte("test-1"),
+	}
+
+	replyInt := client.Exists(i.key)
+	if replyInt.Err() != nil {
+		t.Fatal(replyInt.Err())
+	}
+
+	if replyInt.Val() != 0 {
+		t.Fatal("should be 0")
+	}
+
+	err := keeper.StoreWithoutBlocking(i)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = keeper.Persist(i.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	replyDur := client.TTL(i.key)
+	if replyDur.Err() != nil {
+		t.Fatal(replyDur.Err())
+	}
+
+	if replyDur.Val() != -1*time.Second {
+		t.Fatalf("expected: -1s, got: %d", replyDur.Val())
+	}
+}

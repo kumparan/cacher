@@ -96,6 +96,9 @@ type (
 		StoreHashMember(string, Item) error
 		GetHashMember(identifier string, key string) (interface{}, error)
 		DeleteHashMember(identifier string, key string) error
+
+		// Persist
+		Persist(key string) error
 	}
 
 	keeper struct {
@@ -641,4 +644,13 @@ func (k *keeper) DeleteHashMember(identifier string, key string) (err error) {
 	}
 
 	return k.connPool.HDel(identifier, key).Err()
+}
+
+// Persist :nodoc:
+func (k *keeper) Persist(key string) (err error) {
+	if k.disableCaching {
+		return
+	}
+
+	return k.connPool.Persist(key).Err()
 }
