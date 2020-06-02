@@ -3,6 +3,7 @@ package cacher
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -900,7 +901,7 @@ func TestIncreaseHashMemberValue(t *testing.T) {
 	assert.EqualValues(t, 5, count)
 }
 
-func TestGetHashKeys(t *testing.T) {
+func TestGetHashMemberThenDelete(t *testing.T) {
 	// Initialize new cache keeper
 	k := NewKeeper()
 
@@ -912,15 +913,63 @@ func TestGetHashKeys(t *testing.T) {
 	k.SetLockConnectionPool(r)
 
 	bucketKey := "bucket-test"
-	err = k.StoreHashMember(bucketKey, NewItem("key1", "haha"))
+
+	// when hset 2 keys
+	err = k.StoreHashMember(bucketKey, NewItem("key1", int64(1000)))
 	assert.NoError(t, err)
 
-	err = k.StoreHashMember(bucketKey, NewItem("key2", "hehe"))
+	err = k.StoreHashMember(bucketKey, NewItem("key2", int64(2000)))
 	assert.NoError(t, err)
 
-	keys, err := k.GetHashKeys(bucketKey)
+	keys, err := m.HKeys(bucketKey)
+	assert.NoError(t, err)
+	assert.EqualValues(t, len(keys), 2)
+
+	// then call GetHashMemberThenDelete
+	rep, err := k.GetHashMemberThenDelete(bucketKey, "key1")
 	assert.NoError(t, err)
 
-	assert.EqualValues(t, 2, len(keys))
-	assert.EqualValues(t, "key2", keys[1])
+	// should reply value without error
+	strRep := string(rep.([]byte))
+	valInt, err := strconv.ParseInt(strRep, 10, 64)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 1000, valInt)
+
+	// and the keys decreased to 1
+	keys, err = m.HKeys(bucketKey)
+	assert.NoError(t, err)
+	assert.EqualValues(t, len(keys), 1)
+}
+
+func TestHashScan(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	bucketKey := "bucket-test"
+
+	// when hset 3 keys
+	err = k.StoreHashMember(bucketKey, NewItem("key1", 1000))
+	assert.NoError(t, err)
+
+	err = k.StoreHashMember(bucketKey, NewItem("key2", 2000))
+	assert.NoError(t, err)
+
+	err = k.StoreHashMember(bucketKey, NewItem("key3", 3000))
+	assert.NoError(t, err)
+
+	// then call HashScan
+	_, keys, err := k.HashScan(bucketKey, 0)
+	assert.NoError(t, err)
+	// 3 * 2 because hash scan return the field and value
+	assert.EqualValues(t, 3*2, len(keys))
+	assert.EqualValues(t, "key1", keys[0])
+	assert.EqualValues(t, "1000", keys[1])
+	assert.EqualValues(t, "key2", keys[2])
 }

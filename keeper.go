@@ -2,6 +2,7 @@ package cacher
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/go-redsync/redsync"
@@ -70,7 +71,8 @@ type (
 		GetHashMember(identifier string, key string) (interface{}, error)
 		DeleteHashMember(identifier string, key string) error
 		IncreaseHashMemberValue(identifier, key string, value int64) (int64, error)
-		GetHashKeys(identifier string) ([]string, error)
+		GetHashMemberThenDelete(identifier, key string) (interface{}, error)
+		HashScan(identifier string, curor int64) (next int64, reps []string, err error)
 	}
 
 	keeper struct {
@@ -745,6 +747,7 @@ func (k *keeper) DeleteHashMember(identifier string, key string) (err error) {
 	return
 }
 
+// IncreaseHashMemberValue :nodoc:
 func (k *keeper) IncreaseHashMemberValue(identifier, key string, value int64) (int64, error) {
 	if k.disableCaching {
 		return 0, nil
@@ -762,7 +765,8 @@ func (k *keeper) IncreaseHashMemberValue(identifier, key string, value int64) (i
 	return count, err
 }
 
-func (k *keeper) GetHashKeys(identifier string) ([]string, error) {
+// GetHashMemberThenDelete :nodoc:
+func (k *keeper) GetHashMemberThenDelete(identifier string, key string) (interface{}, error) {
 	if k.disableCaching {
 		return nil, nil
 	}
@@ -770,10 +774,52 @@ func (k *keeper) GetHashKeys(identifier string) ([]string, error) {
 	client := k.connPool.Get()
 	defer client.Close()
 
-	rep, err := redis.Strings(client.Do("HKEYS", identifier))
+	err := client.Send("MULTI")
 	if err != nil {
 		return nil, err
 	}
 
-	return rep, err
+	err = client.Send("HGET", identifier, key)
+	if err != nil {
+		return nil, err
+	}
+
+	err = client.Send("HDEL", identifier, key)
+	if err != nil {
+		return nil, err
+	}
+
+	rep, err := redis.Values(client.Do("EXEC"))
+	return rep[0], nil
+}
+
+// HashScan iterate hash member
+func (k *keeper) HashScan(identifier string, curor int64) (next int64, reps []string, err error) {
+	if k.disableCaching {
+		return 0, nil, nil
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	rep, err := redis.Values(client.Do("HSCAN", identifier, curor))
+	return parseScanResults(rep)
+}
+
+func parseScanResults(results []interface{}) (int64, []string, error) {
+	if len(results) != 2 {
+		return 0, []string{}, nil
+	}
+
+	cursorIndex, err := strconv.ParseInt(string(results[0].([]byte)), 10, 64)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	keyInterfaces := results[1].([]interface{})
+	keys := make([]string, len(keyInterfaces))
+	for index, keyInterface := range keyInterfaces {
+		keys[index] = string(keyInterface.([]byte))
+	}
+	return cursorIndex, keys, nil
 }
