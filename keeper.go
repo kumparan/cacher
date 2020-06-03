@@ -71,7 +71,7 @@ type (
 		DeleteHashMember(identifier string, key string) error
 		IncreaseHashMemberValue(identifier, key string, value int64) (int64, error)
 		GetHashMemberThenDelete(identifier, key string) (interface{}, error)
-		HashScan(identifier string, curor int64) (next int64, reps []string, err error)
+		HashScan(identifier string, cursor int64) (next int64, reps []string, err error)
 	}
 
 	keeper struct {
@@ -797,32 +797,40 @@ func (k *keeper) GetHashMemberThenDelete(identifier string, key string) (interfa
 }
 
 // HashScan iterate hash member
-func (k *keeper) HashScan(identifier string, curor int64) (next int64, reps []string, err error) {
+func (k *keeper) HashScan(identifier string, cursor int64) (next int64, reps []string, err error) {
 	if k.disableCaching {
-		return 0, nil, nil
+		return
 	}
 
 	client := k.connPool.Get()
 	defer client.Close()
 
-	rep, err := redigo.Values(client.Do("HSCAN", identifier, curor))
+	rep, err := redigo.Values(client.Do("HSCAN", identifier, cursor))
+	if err != nil {
+		return
+	}
+
 	return parseScanResults(rep)
 }
 
-func parseScanResults(results []interface{}) (int64, []string, error) {
+// parse result return from scan
+// the index 0 is the cursor
+// and the rest is the elements
+func parseScanResults(results []interface{}) (cursor int64, elements []string, err error) {
 	if len(results) != 2 {
-		return 0, []string{}, nil
+		return
 	}
 
-	cursorIndex, err := strconv.ParseInt(string(results[0].([]byte)), 10, 64)
+	cursor, err = strconv.ParseInt(string(results[0].([]byte)), 10, 64)
 	if err != nil {
-		return 0, nil, err
+		return
 	}
 
-	keyInterfaces := results[1].([]interface{})
-	keys := make([]string, len(keyInterfaces))
-	for index, keyInterface := range keyInterfaces {
-		keys[index] = string(keyInterface.([]byte))
+	elementsInterface := results[1].([]interface{})
+	elements = make([]string, len(elementsInterface))
+	for index, keyInterface := range elementsInterface {
+		elements[index] = string(keyInterface.([]byte))
 	}
-	return cursorIndex, keys, nil
+
+	return
 }
