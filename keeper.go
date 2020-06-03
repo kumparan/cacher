@@ -756,8 +756,8 @@ func (k *keeper) IncreaseHashMemberValue(identifier, key string, value int64) (i
 	defer client.Close()
 
 	var count int64
-	rep, err := client.Do("HINCRBY", identifier, key, value)
-	if val, ok := rep.(int64); ok {
+	reply, err := client.Do("HINCRBY", identifier, key, value)
+	if val, ok := reply.(int64); ok {
 		count = val
 	}
 
@@ -788,12 +788,12 @@ func (k *keeper) GetHashMemberThenDelete(identifier string, key string) (interfa
 		return nil, err
 	}
 
-	rep, err := redigo.Values(client.Do("EXEC"))
+	reply, err := redigo.Values(client.Do("EXEC"))
 	if err != nil {
 		return nil, err
 	}
 
-	return rep[0], nil
+	return reply[0], nil
 }
 
 // HashScan iterate hash member
@@ -805,13 +805,12 @@ func (k *keeper) HashScan(identifier string, cursor int64) (next int64, result m
 	client := k.connPool.Get()
 	defer client.Close()
 
-	rep, err := redigo.Values(client.Do("HSCAN", identifier, cursor))
+	reply, err := redigo.Values(client.Do("HSCAN", identifier, cursor))
 	if err != nil {
 		return
 	}
 
-	next, parsed, err := parseScanResults(rep)
-
+	next, parsed, err := parseScanResults(reply)
 	result = make(map[string]string)
 	for i := 0; i < len(parsed); i += 2 {
 		result[parsed[i]] = parsed[i+1]

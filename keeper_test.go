@@ -1015,3 +1015,4 @@ func TestHashScan_Empty(t *testing.T) {
 	assert.Empty(t, result)
 	assert.EqualValues(t, 0, cursor)
 }
+
