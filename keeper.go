@@ -2,6 +2,7 @@ package cacher
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/go-redsync/redsync"
@@ -68,6 +69,9 @@ type (
 		StoreHashNilMember(identifier, cacheKey string) error
 		GetHashMember(identifier string, key string) (interface{}, error)
 		DeleteHashMember(identifier string, key string) error
+		IncreaseHashMemberValue(identifier, key string, value int64) (int64, error)
+		GetHashMemberThenDelete(identifier, key string) (interface{}, error)
+		HashScan(identifier string, cursor int64) (next int64, result map[string]string, err error)
 	}
 
 	keeper struct {
@@ -739,5 +743,101 @@ func (k *keeper) DeleteHashMember(identifier string, key string) (err error) {
 	defer client.Close()
 
 	_, err = client.Do("HDEL", identifier, key)
+	return
+}
+
+// IncreaseHashMemberValue :nodoc:
+func (k *keeper) IncreaseHashMemberValue(identifier, key string, value int64) (int64, error) {
+	if k.disableCaching {
+		return 0, nil
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	var count int64
+	reply, err := client.Do("HINCRBY", identifier, key, value)
+	if val, ok := reply.(int64); ok {
+		count = val
+	}
+
+	return count, err
+}
+
+// GetHashMemberThenDelete :nodoc:
+func (k *keeper) GetHashMemberThenDelete(identifier string, key string) (interface{}, error) {
+	if k.disableCaching {
+		return nil, nil
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	err := client.Send("MULTI")
+	if err != nil {
+		return nil, err
+	}
+
+	err = client.Send("HGET", identifier, key)
+	if err != nil {
+		return nil, err
+	}
+
+	err = client.Send("HDEL", identifier, key)
+	if err != nil {
+		return nil, err
+	}
+
+	reply, err := redigo.Values(client.Do("EXEC"))
+	if err != nil {
+		return nil, err
+	}
+
+	return reply[0], nil
+}
+
+// HashScan iterate hash member
+func (k *keeper) HashScan(identifier string, cursor int64) (next int64, result map[string]string, err error) {
+	if k.disableCaching {
+		return
+	}
+
+	client := k.connPool.Get()
+	defer client.Close()
+
+	reply, err := redigo.Values(client.Do("HSCAN", identifier, cursor))
+	if err != nil {
+		return
+	}
+
+	next, parsed, err := parseScanResults(reply)
+	result = make(map[string]string)
+	for i := 0; i < len(parsed); i += 2 {
+		result[parsed[i]] = parsed[i+1]
+
+	}
+
+	return
+}
+
+// parse result return from scan
+// the index 0 is the cursor
+// and the rest is the elements
+func parseScanResults(results []interface{}) (cursor int64, elements []string, err error) {
+	if len(results) != 2 {
+		return
+	}
+
+	cursor, err = strconv.ParseInt(string(results[0].([]byte)), 10, 64)
+	if err != nil {
+		return
+	}
+
+	elementsInterface := results[1].([]interface{})
+	elements = make([]string, len(elementsInterface))
+	for index, keyInterface := range elementsInterface {
+		elements[index] = string(keyInterface.([]byte))
+	}
+
 	return
 }

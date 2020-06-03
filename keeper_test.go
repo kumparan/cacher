@@ -3,6 +3,7 @@ package cacher
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -874,3 +875,144 @@ func TestGetHashMemberOrLock(t *testing.T) {
 		assert.Nil(t, mu2)
 	})
 }
+
+func TestIncreaseHashMemberValue(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	testKey := "increase-test"
+	bucketKey := "bucket-test"
+	_, mu, err := k.GetHashMemberOrLock(bucketKey, testKey)
+	assert.NoError(t, err)
+
+	err = k.Store(mu, NewItem(testKey, 0))
+	assert.NoError(t, err)
+
+	count, err := k.IncreaseHashMemberValue(bucketKey, testKey, 5)
+	assert.NoError(t, err)
+
+	assert.EqualValues(t, 5, count)
+}
+
+func TestGetHashMemberThenDelete(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	bucketKey := "bucket-test"
+
+	// when hset 2 keys
+	err = k.StoreHashMember(bucketKey, NewItem("key1", int64(1000)))
+	assert.NoError(t, err)
+
+	err = k.StoreHashMember(bucketKey, NewItem("key2", int64(2000)))
+	assert.NoError(t, err)
+
+	keys, err := m.HKeys(bucketKey)
+	assert.NoError(t, err)
+	assert.EqualValues(t, len(keys), 2)
+
+	// then call GetHashMemberThenDelete
+	rep, err := k.GetHashMemberThenDelete(bucketKey, "key1")
+	assert.NoError(t, err)
+
+	// should reply value without error
+	strRep := string(rep.([]byte))
+	valInt, err := strconv.ParseInt(strRep, 10, 64)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 1000, valInt)
+
+	// and the keys decreased to 1
+	keys, err = m.HKeys(bucketKey)
+	assert.NoError(t, err)
+	assert.EqualValues(t, len(keys), 1)
+}
+
+func TestGetHashMemberThenDelete_Empty(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	defer m.Close()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	// when the bucket is empty
+	bucketKey := "bucket-test"
+	assert.False(t, m.Exists(bucketKey))
+
+	// and call GetHashMemberThenDelete
+	rep, err := k.GetHashMemberThenDelete(bucketKey, "key1")
+	assert.NoError(t, err)
+	assert.Nil(t, rep)
+}
+
+func TestHashScan(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	bucketKey := "bucket-test"
+
+	// when hset 3 keys
+	cases := map[string]int{
+		"key1": 1000,
+		"key2": 2000,
+		"key3": 3000,
+	}
+
+	for key, val := range cases {
+		err = k.StoreHashMember(bucketKey, NewItem(key, val))
+		assert.NoError(t, err)
+	}
+
+	// then call HashScan
+	_, result, err := k.HashScan(bucketKey, 0)
+	assert.NoError(t, err)
+	for k, v := range result {
+		assert.EqualValues(t, fmt.Sprint(cases[k]), v)
+	}
+}
+
+func TestHashScan_Empty(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	// when bucket is empty
+	bucketKey := "bucket-test"
+	// and call HashScan
+	cursor, result, err := k.HashScan(bucketKey, 0)
+	assert.NoError(t, err)
+	assert.Empty(t, result)
+	assert.EqualValues(t, 0, cursor)
+}
+
