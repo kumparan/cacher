@@ -977,21 +977,41 @@ func TestHashScan(t *testing.T) {
 	bucketKey := "bucket-test"
 
 	// when hset 3 keys
-	err = k.StoreHashMember(bucketKey, NewItem("key1", 1000))
-	assert.NoError(t, err)
+	cases := map[string]int{
+		"key1": 1000,
+		"key2": 2000,
+		"key3": 3000,
+	}
 
-	err = k.StoreHashMember(bucketKey, NewItem("key2", 2000))
-	assert.NoError(t, err)
-
-	err = k.StoreHashMember(bucketKey, NewItem("key3", 3000))
-	assert.NoError(t, err)
+	for key, val := range cases {
+		err = k.StoreHashMember(bucketKey, NewItem(key, val))
+		assert.NoError(t, err)
+	}
 
 	// then call HashScan
-	_, keys, err := k.HashScan(bucketKey, 0)
+	_, result, err := k.HashScan(bucketKey, 0)
 	assert.NoError(t, err)
-	// 3 * 2 because hash scan return the field and value
-	assert.EqualValues(t, 3*2, len(keys))
-	assert.EqualValues(t, "key1", keys[0])
-	assert.EqualValues(t, "1000", keys[1])
-	assert.EqualValues(t, "key2", keys[2])
+	for k, v := range result {
+		assert.EqualValues(t, fmt.Sprint(cases[k]), v)
+	}
+}
+
+func TestHashScan_Empty(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	// when bucket is empty
+	bucketKey := "bucket-test"
+	// and call HashScan
+	cursor, result, err := k.HashScan(bucketKey, 0)
+	assert.NoError(t, err)
+	assert.Empty(t, result)
+	assert.EqualValues(t, 0, cursor)
 }

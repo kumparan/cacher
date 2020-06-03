@@ -71,7 +71,7 @@ type (
 		DeleteHashMember(identifier string, key string) error
 		IncreaseHashMemberValue(identifier, key string, value int64) (int64, error)
 		GetHashMemberThenDelete(identifier, key string) (interface{}, error)
-		HashScan(identifier string, cursor int64) (next int64, reps []string, err error)
+		HashScan(identifier string, cursor int64) (next int64, result map[string]string, err error)
 	}
 
 	keeper struct {
@@ -797,7 +797,7 @@ func (k *keeper) GetHashMemberThenDelete(identifier string, key string) (interfa
 }
 
 // HashScan iterate hash member
-func (k *keeper) HashScan(identifier string, cursor int64) (next int64, reps []string, err error) {
+func (k *keeper) HashScan(identifier string, cursor int64) (next int64, result map[string]string, err error) {
 	if k.disableCaching {
 		return
 	}
@@ -810,7 +810,15 @@ func (k *keeper) HashScan(identifier string, cursor int64) (next int64, reps []s
 		return
 	}
 
-	return parseScanResults(rep)
+	next, parsed, err := parseScanResults(rep)
+
+	result = make(map[string]string)
+	for i := 0; i < len(parsed); i += 2 {
+		result[parsed[i]] = parsed[i+1]
+
+	}
+
+	return
 }
 
 // parse result return from scan
