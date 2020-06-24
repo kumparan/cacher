@@ -9,5 +9,11 @@ endif
 
 test_command=$(GOCOMMAND) test ./... $(TEST_ARGS) -v --cover
 
-test:
+check-cognitive-complexity:
+	-gocognit -over 15 .
+
+lint: check-cognitive-complexity
+	golangci-lint run --print-issued-lines=false --exclude-use-default=false --enable=golint --enable=goimports  --enable=unconvert --enable=unparam --concurrency=2
+
+test: lint
 	$(test_command)
