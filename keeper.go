@@ -478,7 +478,8 @@ func (k *keeper) getCachedItem(key string) (value interface{}, err error) {
 		return nil, err
 	}
 
-	if res[0].(int64) <= 0 {
+	val, ok := res[0].(int64)
+	if !ok || val <= 0 {
 		return nil, ErrKeyNotExist
 	}
 
@@ -504,9 +505,8 @@ func (k *keeper) CheckKeyExist(key string) (value bool, err error) {
 	defer client.Close()
 
 	val, err := client.Do("EXISTS", key)
-
-	value = false
-	if val.(int64) > 0 {
+	res, ok := val.(int64)
+	if ok && res > 0 {
 		value = true
 	}
 
@@ -726,7 +726,8 @@ func (k *keeper) GetHashMember(identifier string, key string) (value interface{}
 		return nil, err
 	}
 
-	if res[0].(int64) <= 0 {
+	val, ok := res[0].(int64)
+	if !ok || val <= 0 {
 		return nil, ErrKeyNotExist
 	}
 
