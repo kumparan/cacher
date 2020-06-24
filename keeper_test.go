@@ -148,7 +148,7 @@ func TestGetOrSet(t *testing.T) {
 		ttl := 1600 * time.Second
 		retVal, err := k.GetOrSet(testKey, func() (i interface{}, e error) {
 			return val, nil
-		}, time.Duration(ttl))
+		}, ttl)
 		assert.NoError(t, err)
 		assert.EqualValues(t, val, retVal)
 		assert.True(t, m.Exists(testKey))
@@ -160,7 +160,7 @@ func TestGetOrSet(t *testing.T) {
 		ttl := 1600 * time.Second
 		retVal, err := k.GetOrSet(testKey, func() (i interface{}, e error) {
 			return "thisis-not-expected", nil
-		}, time.Duration(ttl))
+		}, ttl)
 		assert.NoError(t, err)
 		assert.EqualValues(t, val, retVal)
 		assert.True(t, m.Exists(testKey))
@@ -645,7 +645,7 @@ func TestGetOrLock(t *testing.T) {
 
 		t1 := time.Now()
 		result, mu2, err := k.GetOrLock(key)
-		d := time.Now().Sub(t1)
+		d := time.Since(t1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -689,7 +689,7 @@ func TestGetOrLock(t *testing.T) {
 
 		t1 := time.Now()
 		result, mu2, err := k.GetOrLock(key)
-		d := time.Now().Sub(t1)
+		d := time.Since(t1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -790,7 +790,7 @@ func TestGetHashMemberOrLock(t *testing.T) {
 
 		t1 := time.Now()
 		result, mu2, err := k.GetHashMemberOrLock(id, key)
-		d := time.Now().Sub(t1)
+		d := time.Since(t1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -835,7 +835,7 @@ func TestGetHashMemberOrLock(t *testing.T) {
 
 		t1 := time.Now()
 		result, mu2, err := k.GetHashMemberOrLock(id, key)
-		d := time.Now().Sub(t1)
+		d := time.Since(t1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -946,8 +946,8 @@ func TestGetHashMemberThenDelete_Empty(t *testing.T) {
 	k := NewKeeper()
 
 	m, err := miniredis.Run()
-	defer m.Close()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -1015,4 +1015,3 @@ func TestHashScan_Empty(t *testing.T) {
 	assert.Empty(t, result)
 	assert.EqualValues(t, 0, cursor)
 }
-
