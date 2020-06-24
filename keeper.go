@@ -144,9 +144,9 @@ func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redsync.M
 					mutex, err = k.AcquireLock(key)
 					if err == nil {
 						return nil, mutex, nil
-					} else {
-						goto Wait
 					}
+
+					goto Wait
 				}
 				return nil, nil, err
 			}
@@ -204,7 +204,9 @@ func (k *keeper) Store(mutex *redsync.Mutex, c Item) error {
 	}()
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	_, err := client.Do("SETEX", c.GetKey(), k.decideCacheTTL(c), c.GetValue())
 	return err
@@ -217,7 +219,9 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 	}
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	_, err := client.Do("SETEX", c.GetKey(), k.decideCacheTTL(c), c.GetValue())
 	return err
@@ -244,7 +248,9 @@ func (k *keeper) Purge(matchString string) error {
 	}
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	var cursor interface{}
 	var stop []uint8
@@ -274,7 +280,7 @@ func (k *keeper) Purge(matchString string) error {
 		cursor = res[0]
 	}
 	if delCount > 0 {
-		client.Flush()
+		_ = client.Flush()
 	}
 	return nil
 }
@@ -287,7 +293,9 @@ func (k *keeper) IncreaseCachedValueByOne(key string) error {
 	}
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	_, err := client.Do("INCR", key)
 	return err
@@ -349,7 +357,9 @@ func (k *keeper) DeleteByKeys(keys []string) error {
 	}
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	redisKeys := []interface{}{}
 	for _, key := range keys {
@@ -367,7 +377,9 @@ func (k *keeper) StoreMultiWithoutBlocking(items []Item) error {
 	}
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	err := client.Send("MULTI")
 	if err != nil {
@@ -391,7 +403,9 @@ func (k *keeper) StoreMultiPersist(items []Item) error {
 	}
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	err := client.Send("MULTI")
 	if err != nil {
@@ -419,7 +433,9 @@ func (k *keeper) Expire(key string, duration time.Duration) (err error) {
 	}
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	_, err = client.Do("EXPIRE", key, int64(duration.Seconds()))
 	return
@@ -432,7 +448,9 @@ func (k *keeper) ExpireMulti(items map[string]time.Duration) error {
 	}
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	err := client.Send("MULTI")
 	if err != nil {
@@ -459,7 +477,9 @@ func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
 
 func (k *keeper) getCachedItem(key string) (value interface{}, err error) {
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	err = client.Send("MULTI")
 	if err != nil {
@@ -488,7 +508,9 @@ func (k *keeper) getCachedItem(key string) (value interface{}, err error) {
 
 func (k *keeper) isLocked(key string) bool {
 	client := k.lockConnPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	reply, err := client.Do("GET", "lock:"+key)
 	if err != nil || reply == nil {
@@ -502,7 +524,9 @@ func (k *keeper) isLocked(key string) bool {
 func (k *keeper) CheckKeyExist(key string) (value bool, err error) {
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	val, err := client.Do("EXISTS", key)
 	res, ok := val.(int64)
@@ -516,7 +540,9 @@ func (k *keeper) CheckKeyExist(key string) (value bool, err error) {
 // StoreRightList :nodoc:
 func (k *keeper) StoreRightList(name string, value interface{}) error {
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	_, err := client.Do("RPUSH", name, value)
 
@@ -526,7 +552,9 @@ func (k *keeper) StoreRightList(name string, value interface{}) error {
 // StoreLeftList :nodoc:
 func (k *keeper) StoreLeftList(name string, value interface{}) error {
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	_, err := client.Do("LPUSH", name, value)
 
@@ -535,7 +563,9 @@ func (k *keeper) StoreLeftList(name string, value interface{}) error {
 
 func (k *keeper) GetListLength(name string) (value int64, err error) {
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	val, err := client.Do("LLEN", name)
 	value = val.(int64)
@@ -545,7 +575,9 @@ func (k *keeper) GetListLength(name string) (value int64, err error) {
 
 func (k *keeper) GetAndRemoveFirstListElement(name string) (value interface{}, err error) {
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	llen, err := k.GetListLength(name)
 	if err != nil {
@@ -562,7 +594,9 @@ func (k *keeper) GetAndRemoveFirstListElement(name string) (value interface{}, e
 
 func (k *keeper) GetAndRemoveLastListElement(name string) (value interface{}, err error) {
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	llen, err := k.GetListLength(name)
 	if err != nil {
@@ -581,7 +615,9 @@ func (k *keeper) GetList(name string, size int64, page int64) (value interface{}
 	offset := getOffset(page, size)
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	llen, err := k.GetListLength(name)
 	if err != nil {
@@ -600,7 +636,9 @@ func (k *keeper) GetList(name string, size int64, page int64) (value interface{}
 
 func (k *keeper) GetTTL(name string) (value int64, err error) {
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	val, err := client.Do("TTL", name)
 	if err != nil {
@@ -627,7 +665,9 @@ func (k *keeper) StoreHashMember(identifier string, c Item) (err error) {
 	}
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	err = client.Send("MULTI")
 	if err != nil {
@@ -679,9 +719,9 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 					mutex, err = k.AcquireLock(lockKey)
 					if err == nil {
 						return nil, mutex, nil
-					} else {
-						goto Wait
 					}
+
+					goto Wait
 				}
 				return nil, nil, err
 			}
@@ -707,7 +747,9 @@ func (k *keeper) GetHashMember(identifier string, key string) (value interface{}
 	}
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	err = client.Send("MULTI")
 	if err != nil {
@@ -741,7 +783,9 @@ func (k *keeper) DeleteHashMember(identifier string, key string) (err error) {
 	}
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	_, err = client.Do("HDEL", identifier, key)
 	return
@@ -754,7 +798,9 @@ func (k *keeper) IncreaseHashMemberValue(identifier, key string, value int64) (i
 	}
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	var count int64
 	reply, err := client.Do("HINCRBY", identifier, key, value)
@@ -772,7 +818,9 @@ func (k *keeper) GetHashMemberThenDelete(identifier string, key string) (interfa
 	}
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	err := client.Send("MULTI")
 	if err != nil {
@@ -804,7 +852,9 @@ func (k *keeper) HashScan(identifier string, cursor int64) (next int64, result m
 	}
 
 	client := k.connPool.Get()
-	defer client.Close()
+	defer func() {
+		_ = client.Close()
+	}()
 
 	reply, err := redigo.Values(client.Do("HSCAN", identifier, cursor))
 	if err != nil {
