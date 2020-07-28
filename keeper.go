@@ -871,6 +871,13 @@ func (k *keeper) HashScan(identifier string, cursor int64) (next int64, result m
 	return
 }
 
+// SafeUnlock safely unlock mutex
+func SafeUnlock(mutex *redsync.Mutex) {
+	if mutex != nil {
+		mutex.Unlock()
+	}
+}
+
 // parse result return from scan
 // the index 0 is the cursor
 // and the rest is the elements
