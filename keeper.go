@@ -30,6 +30,7 @@ type (
 		Get(string) (interface{}, error)
 		GetOrLock(string) (interface{}, *redsync.Mutex, error)
 		GetOrSet(string, CacheGeneratorFn, time.Duration) (interface{}, error)
+		GetMulti(keys ...string) (replies []interface{}, err error)
 		Store(*redsync.Mutex, Item) error
 		StoreWithoutBlocking(Item) error
 		StoreMultiWithoutBlocking([]Item) error
@@ -866,6 +867,42 @@ func (k *keeper) HashScan(identifier string, cursor int64) (next int64, result m
 	for i := 0; i < len(parsed); i += 2 {
 		result[parsed[i]] = parsed[i+1]
 
+	}
+
+	return
+}
+
+// GetMulti get multiple object by keys using pipelines
+func (k *keeper) GetMulti(keys ...string) (replies []interface{}, err error) {
+	if k.disableCaching {
+		return
+	}
+	client := k.connPool.Get()
+	defer func() {
+		_ = client.Close()
+	}()
+
+	for _, key := range keys {
+		err := client.Send("GET", key)
+		if err != nil {
+			return nil, fmt.Errorf("failed to GET key %s: %w", key, err)
+		}
+	}
+	err = client.Flush()
+	if err != nil {
+		return nil, fmt.Errorf("unable to flush: %w", err)
+	}
+
+	for range keys {
+		reply, err := client.Receive()
+		if err == redigo.ErrNil {
+			replies = append(replies, nil) // nil when not found
+			continue
+		} else if err != nil {
+			return nil, fmt.Errorf("failed to recieve reply: %w", err)
+		}
+
+		replies = append(replies, reply)
 	}
 
 	return
