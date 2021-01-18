@@ -1036,6 +1036,23 @@ func TestHashScan_Empty(t *testing.T) {
 	assert.EqualValues(t, 0, cursor)
 }
 
+func Test_GetMulti_MissingKeys(t *testing.T) {
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+	defer m.Close()
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	reps, misses, err := k.GetMulti([]string{"missing"}...)
+	assert.NoError(t, err)
+	assert.Nil(t, reps)
+	assert.Equal(t, "missing", misses[0])
+}
+
 func Test_GetMulti(t *testing.T) {
 	k := NewKeeper()
 
@@ -1056,11 +1073,24 @@ func Test_GetMulti(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	replies, err := k.GetMulti(keys...)
+	var testKeys []string
+	_ = copy(testKeys, keys)
+
+	testKeys = append(testKeys, "missing", "notfound")
+	replies, misses, err := k.GetMulti(testKeys...)
 	assert.NoError(t, err)
+
+	// keys should exists
 	for i, rep := range replies {
 		val, ok := rep.([]byte)
 		assert.True(t, ok)
 		assert.Equal(t, keys[i], string(val))
 	}
+
+	assert.Equal(t, 2, len(misses))
+	assert.Equal(t, "missing", misses[0])
+	assert.Equal(t, "notfound", misses[1])
+
+	// testKeys = replies + misses
+	assert.Equal(t, len(testKeys), len(replies)+len(misses))
 }
