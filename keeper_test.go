@@ -1047,10 +1047,10 @@ func Test_GetMulti_MissingKeys(t *testing.T) {
 	k.SetConnectionPool(r)
 	k.SetLockConnectionPool(r)
 
-	reps, misses, err := k.GetMulti([]string{"missing"}...)
+	reps, err := k.GetMulti([]string{"missing"}...)
 	assert.NoError(t, err)
-	assert.Nil(t, reps)
-	assert.Equal(t, "missing", misses[0])
+	assert.Equal(t, 1, len(reps))
+	assert.Equal(t, nil, reps[0])
 }
 
 func Test_GetMulti(t *testing.T) {
@@ -1073,24 +1073,25 @@ func Test_GetMulti(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	var testKeys []string
+	testKeys := make([]string, len(keys))
 	_ = copy(testKeys, keys)
 
 	testKeys = append(testKeys, "missing", "notfound")
-	replies, misses, err := k.GetMulti(testKeys...)
+	replies, err := k.GetMulti(testKeys...)
 	assert.NoError(t, err)
 
-	// keys should exists
-	for i, rep := range replies {
-		val, ok := rep.([]byte)
+	// last two is nil
+	assert.Equal(t, nil, replies[len(replies)-2])
+	assert.Equal(t, nil, replies[len(replies)-1])
+
+	// keys should exists and sorted
+	for i, key := range keys {
+		val, ok := replies[i].([]byte)
+		vals := string(val)
 		assert.True(t, ok)
-		assert.Equal(t, keys[i], string(val))
+		assert.Equal(t, key, vals)
 	}
 
-	assert.Equal(t, 2, len(misses))
-	assert.Equal(t, "missing", misses[0])
-	assert.Equal(t, "notfound", misses[1])
-
 	// testKeys = replies + misses
-	assert.Equal(t, len(testKeys), len(replies)+len(misses))
+	assert.Equal(t, len(testKeys), len(replies))
 }

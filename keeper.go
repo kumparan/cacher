@@ -30,7 +30,7 @@ type (
 		Get(string) (interface{}, error)
 		GetOrLock(string) (interface{}, *redsync.Mutex, error)
 		GetOrSet(string, CacheGeneratorFn, time.Duration) (interface{}, error)
-		GetMulti(keys ...string) (replies []interface{}, missingKeys []string, err error)
+		GetMulti(keys ...string) (replies []interface{}, err error)
 		Store(*redsync.Mutex, Item) error
 		StoreWithoutBlocking(Item) error
 		StoreMultiWithoutBlocking([]Item) error
@@ -873,7 +873,7 @@ func (k *keeper) HashScan(identifier string, cursor int64) (next int64, result m
 }
 
 // GetMulti get multiple object by keys using pipelines
-func (k *keeper) GetMulti(keys ...string) (replies []interface{}, missingKeys []string, err error) {
+func (k *keeper) GetMulti(keys ...string) (replies []interface{}, err error) {
 	if k.disableCaching {
 		return
 	}
@@ -885,23 +885,22 @@ func (k *keeper) GetMulti(keys ...string) (replies []interface{}, missingKeys []
 	for _, key := range keys {
 		err := client.Send("GET", key)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to GET key %s: %w", key, err)
+			return nil, fmt.Errorf("failed to GET key %s: %w", key, err)
 		}
 	}
 	err = client.Flush()
 	if err != nil {
-		return nil, nil, fmt.Errorf("unable to flush: %w", err)
+		return nil, fmt.Errorf("unable to flush: %w", err)
 	}
 
-	// TODO: make sure Receive is soreted by keys
-	for _, key := range keys {
+	for range keys {
 		reply, err := client.Receive()
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to recieve reply: %w", err)
+			return nil, fmt.Errorf("failed to recieve reply: %w", err)
 		}
 
 		if reply == nil {
-			missingKeys = append(missingKeys, key) // nil when not found
+			replies = append(replies, reply) // nil when not found
 			continue
 		}
 
