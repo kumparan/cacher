@@ -10,7 +10,7 @@ import (
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/alicebob/miniredis"
+	"github.com/alicebob/miniredis/v2"
 )
 
 func newRedisConn(url string) *redigo.Pool {

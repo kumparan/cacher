@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-redsync/redsync"
+	"github.com/go-redsync/redsync/v2"
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
 )
