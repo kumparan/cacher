@@ -38,6 +38,7 @@ func TestCheckKeyExist(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -67,6 +68,7 @@ func TestGet(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -97,6 +99,7 @@ func TestGetLockStore(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -134,6 +137,7 @@ func TestGetOrSet(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -173,6 +177,7 @@ func TestPurge(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -234,6 +239,7 @@ func TestIncreaseCachedValueByOne(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -265,6 +271,7 @@ func TestDeleteByKeys(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -317,6 +324,7 @@ func TestStoreMultiWithoutBlocking(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -356,6 +364,7 @@ func TestStoreMultiPersist(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -379,6 +388,7 @@ func TestExpire(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -401,6 +411,7 @@ func TestExpireMulti(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -432,6 +443,7 @@ func TestGetLockStoreRightLeftList(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -463,6 +475,7 @@ func TestGetAndRemoveFirstAndLastListElement(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -497,6 +510,7 @@ func TestGetListLength(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -522,6 +536,7 @@ func TestGetTTL(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -882,6 +897,7 @@ func TestIncreaseHashMemberValue(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -907,6 +923,7 @@ func TestGetHashMemberThenDelete(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -948,6 +965,7 @@ func TestGetHashMemberThenDelete_Empty(t *testing.T) {
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
 	defer m.Close()
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -969,6 +987,7 @@ func TestHashScan(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -1002,6 +1021,7 @@ func TestHashScan_Empty(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -1014,4 +1034,64 @@ func TestHashScan_Empty(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Empty(t, result)
 	assert.EqualValues(t, 0, cursor)
+}
+
+func Test_GetMulti_MissingKeys(t *testing.T) {
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+	defer m.Close()
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	reps, err := k.GetMulti([]string{"missing"}...)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(reps))
+	assert.Equal(t, nil, reps[0])
+}
+
+func Test_GetMulti(t *testing.T) {
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+	defer m.Close()
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	// seed data
+	var keys []string
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("multi:%d", i)
+		keys = append(keys, key)
+		err = k.StoreWithoutBlocking(NewItem(key, key))
+		assert.NoError(t, err)
+	}
+
+	testKeys := make([]string, len(keys))
+	_ = copy(testKeys, keys)
+
+	testKeys = append(testKeys, "missing", "notfound")
+	replies, err := k.GetMulti(testKeys...)
+	assert.NoError(t, err)
+
+	// last two is nil
+	assert.Equal(t, nil, replies[len(replies)-2])
+	assert.Equal(t, nil, replies[len(replies)-1])
+
+	// keys should exists and sorted
+	for i, key := range keys {
+		val, ok := replies[i].([]byte)
+		vals := string(val)
+		assert.True(t, ok)
+		assert.Equal(t, key, vals)
+	}
+
+	// testKeys = replies + misses
+	assert.Equal(t, len(testKeys), len(replies))
 }
