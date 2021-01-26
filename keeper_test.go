@@ -8,6 +8,7 @@ import (
 
 	"github.com/alicebob/miniredis"
 	"github.com/go-redis/redis"
+	"github.com/stretchr/testify/assert"
 )
 
 var client *redis.Client
@@ -666,4 +667,85 @@ func TestKeeper_Persist(t *testing.T) {
 	if replyDur.Val() != -1*time.Second {
 		t.Fatalf("expected: -1s, got: %d", replyDur.Val())
 	}
+}
+
+func TestKeeper_GetMultiHashMembers(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		keeper := newTestKeeper()
+		mapKeyToBucket := make(map[string]string)
+		bucket := "bucket"
+		var keys []string
+		for i := 0; i < 10; i++ {
+			key := fmt.Sprintf("key-%d", i)
+			keys = append(keys, key)
+			mapKeyToBucket[key] = bucket
+			err := keeper.StoreHashMember(bucket, &item{
+				key:   key,
+				ttl:   defaultTTL,
+				value: []byte(key),
+			})
+			assert.NoError(t, err)
+		}
+
+		replies, err := keeper.GetMultiHashMembers(mapKeyToBucket)
+		assert.NoError(t, err)
+
+		// make sure all keys is found
+		assert.Equal(t, len(mapKeyToBucket), len(replies))
+
+		for _, reply := range replies {
+			strCMD, ok := reply.(*redis.StringCmd)
+			assert.True(t, ok)
+			val, err := strCMD.Result()
+			assert.NoError(t, err)
+			assert.Contains(t, keys, val)
+		}
+	})
+
+	t.Run("missing some keys", func(t *testing.T) {
+		keeper := newTestKeeper()
+		mapKeyToBucket := make(map[string]string)
+		bucket := "bucket"
+		var keys []string
+		for i := 0; i < 10; i++ {
+			key := fmt.Sprintf("key-%d", i)
+			keys = append(keys, key)
+			err := keeper.StoreHashMember(bucket, &item{
+				key:   key,
+				ttl:   defaultTTL,
+				value: []byte(key),
+			})
+			assert.NoError(t, err)
+		}
+
+		keysWithMissings := make([]string, len(keys))
+		copy(keysWithMissings, keys)
+		missingKeys := []string{"11", "12", "13"}
+		keysWithMissings = append(keysWithMissings, missingKeys...)
+		for _, key := range keysWithMissings {
+			mapKeyToBucket[key] = bucket
+		}
+
+		replies, err := keeper.GetMultiHashMembers(mapKeyToBucket)
+		assert.NoError(t, err)
+		assert.Equal(t, len(mapKeyToBucket), len(replies))
+
+		var notFoundArgs []string
+		for _, reply := range replies {
+			strCMD, ok := reply.(*redis.StringCmd)
+			assert.True(t, ok)
+			val, err := strCMD.Result()
+			if val == "" {
+				assert.EqualError(t, redis.Nil, err.Error())
+				notFoundArgs = append(notFoundArgs, strCMD.Args()[2].(string))
+				continue
+			}
+			assert.NoError(t, err)
+			assert.Contains(t, keys, val)
+		}
+
+		for _, missingKey := range missingKeys {
+			assert.Contains(t, notFoundArgs, missingKey)
+		}
+	})
 }

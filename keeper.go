@@ -24,6 +24,7 @@ type (
 	// RedisConnector :Cluster or Client:
 	RedisConnector interface {
 		TxPipeline() goredis.Pipeliner
+		Pipeline() goredis.Pipeliner
 
 		Get(key string) *goredis.StringCmd
 		Set(key string, value interface{}, expiration time.Duration) *goredis.StatusCmd
@@ -96,6 +97,7 @@ type (
 		StoreHashMember(string, Item) error
 		GetHashMember(identifier string, key string) (interface{}, error)
 		DeleteHashMember(identifier string, key string) error
+		GetMultiHashMembers(mapKeyToBucket map[string]string) ([]interface{}, error)
 
 		// Persist
 		Persist(key string) error
@@ -412,6 +414,7 @@ func (k *keeper) getCachedItem(key string) (value interface{}, err error) {
 	if k.disableCaching {
 		return
 	}
+
 	resp, err := k.connPool.Get(key).Result()
 	switch {
 	case err != nil && err != goredis.Nil:
@@ -635,6 +638,28 @@ func (k *keeper) GetHashMember(identifier string, key string) (value interface{}
 	}
 	value = []byte(resp)
 	return
+}
+
+// GetMultiHashMembers return type is *goredis.StringCmd
+// to reduce looping and casting, so the caller is the one that should cast it
+func (k *keeper) GetMultiHashMembers(mapKeyToBucket map[string]string) (replies []interface{}, err error) {
+	if k.disableCaching || len(mapKeyToBucket) == 0 {
+		return
+	}
+
+	pipe := k.connPool.Pipeline()
+	defer pipe.Close()
+
+	for key, bucket := range mapKeyToBucket {
+		replies = append(replies, pipe.HGet(bucket, key))
+	}
+
+	_, err = pipe.Exec()
+	if err != nil && err != goredis.Nil {
+		return nil, fmt.Errorf("failed to exec pipe: %w", err)
+	}
+
+	return replies, nil
 }
 
 // DeleteHashMember :nodoc:
