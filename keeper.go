@@ -1,6 +1,7 @@
 package cacher
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -8,6 +9,9 @@ import (
 	goredis "github.com/go-redis/redis"
 	"github.com/jpillora/backoff"
 )
+
+// ErrNotFound :nodoc:
+var ErrNotFound = errors.New("not found")
 
 const (
 	// Override these when constructing the cache keeper
@@ -678,4 +682,19 @@ func (k *keeper) Persist(key string) (err error) {
 	}
 
 	return k.connPool.Persist(key).Err()
+}
+
+// GetGoredisResult :nodoc:
+func GetGoredisResult(reply interface{}) (string, error) {
+	strCMD, ok := reply.(*goredis.StringCmd)
+	if !ok {
+		return "", errors.New("")
+	}
+
+	res, err := strCMD.Result()
+	if errors.Is(err, goredis.Nil) {
+		return "", ErrNotFound
+	}
+
+	return res, nil
 }
