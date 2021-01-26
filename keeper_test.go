@@ -672,13 +672,16 @@ func TestKeeper_Persist(t *testing.T) {
 func TestKeeper_GetMultiHashMembers(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		keeper := newTestKeeper()
-		mapKeyToBucket := make(map[string]string)
+		var hasMembers []HashMember
 		bucket := "bucket"
-		var keys []string
+		var members []string
 		for i := 0; i < 10; i++ {
 			key := fmt.Sprintf("key-%d", i)
-			keys = append(keys, key)
-			mapKeyToBucket[key] = bucket
+			members = append(members, key)
+			hasMembers = append(hasMembers, HashMember{
+				Identifier: bucket,
+				Key:        key,
+			})
 			err := keeper.StoreHashMember(bucket, &item{
 				key:   key,
 				ttl:   defaultTTL,
@@ -687,24 +690,24 @@ func TestKeeper_GetMultiHashMembers(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		replies, err := keeper.GetMultiHashMembers(mapKeyToBucket)
+		replies, err := keeper.GetMultiHashMembers(hasMembers)
 		assert.NoError(t, err)
 
 		// make sure all keys is found
-		assert.Equal(t, len(mapKeyToBucket), len(replies))
+		assert.Equal(t, len(hasMembers), len(replies))
 
 		for _, reply := range replies {
 			strCMD, ok := reply.(*redis.StringCmd)
 			assert.True(t, ok)
 			val, err := strCMD.Result()
 			assert.NoError(t, err)
-			assert.Contains(t, keys, val)
+			assert.Contains(t, members, val)
 		}
 	})
 
 	t.Run("missing some keys", func(t *testing.T) {
 		keeper := newTestKeeper()
-		mapKeyToBucket := make(map[string]string)
+		var hashMembers []HashMember
 		bucket := "bucket"
 		var keys []string
 		for i := 0; i < 10; i++ {
@@ -723,29 +726,29 @@ func TestKeeper_GetMultiHashMembers(t *testing.T) {
 		missingKeys := []string{"11", "12", "13"}
 		keysWithMissings = append(keysWithMissings, missingKeys...)
 		for _, key := range keysWithMissings {
-			mapKeyToBucket[key] = bucket
+			hashMembers = append(hashMembers, HashMember{
+				Identifier: bucket,
+				Key:        key,
+			})
 		}
 
-		replies, err := keeper.GetMultiHashMembers(mapKeyToBucket)
+		replies, err := keeper.GetMultiHashMembers(hashMembers)
 		assert.NoError(t, err)
-		assert.Equal(t, len(mapKeyToBucket), len(replies))
+		assert.Equal(t, len(hashMembers), len(replies))
 
-		var notFoundArgs []string
-		for _, reply := range replies {
-			strCMD, ok := reply.(*redis.StringCmd)
+		// make sure replies is sorted like
+		for i := range keysWithMissings {
+			strCMD, ok := replies[i].(*redis.StringCmd)
 			assert.True(t, ok)
 			val, err := strCMD.Result()
 			if val == "" {
 				assert.EqualError(t, redis.Nil, err.Error())
-				notFoundArgs = append(notFoundArgs, strCMD.Args()[2].(string))
+				assert.Equal(t, keysWithMissings[i], strCMD.Args()[2])
 				continue
 			}
-			assert.NoError(t, err)
-			assert.Contains(t, keys, val)
-		}
 
-		for _, missingKey := range missingKeys {
-			assert.Contains(t, notFoundArgs, missingKey)
+			assert.NoError(t, err)
+			assert.Equal(t, keys[i], val)
 		}
 	})
 }

@@ -24,6 +24,12 @@ const (
 
 var nilJSON = []byte("null")
 
+// HashMember :nodoc:
+type HashMember struct {
+	Identifier string
+	Key        string
+}
+
 type (
 	// RedisConnector :Cluster or Client:
 	RedisConnector interface {
@@ -101,7 +107,7 @@ type (
 		StoreHashMember(string, Item) error
 		GetHashMember(identifier string, key string) (interface{}, error)
 		DeleteHashMember(identifier string, key string) error
-		GetMultiHashMembers(mapKeyToBucket map[string]string) ([]interface{}, error)
+		GetMultiHashMembers(hashMember []HashMember) ([]interface{}, error)
 
 		// Persist
 		Persist(key string) error
@@ -646,16 +652,16 @@ func (k *keeper) GetHashMember(identifier string, key string) (value interface{}
 
 // GetMultiHashMembers return type is *goredis.StringCmd
 // to reduce looping and casting, so the caller is the one that should cast it
-func (k *keeper) GetMultiHashMembers(mapKeyToBucket map[string]string) (replies []interface{}, err error) {
-	if k.disableCaching || len(mapKeyToBucket) == 0 {
+func (k *keeper) GetMultiHashMembers(hashMember []HashMember) (replies []interface{}, err error) {
+	if k.disableCaching || len(hashMember) == 0 {
 		return
 	}
 
 	pipe := k.connPool.Pipeline()
 	defer pipe.Close()
 
-	for key, bucket := range mapKeyToBucket {
-		replies = append(replies, pipe.HGet(bucket, key))
+	for _, hm := range hashMember {
+		replies = append(replies, pipe.HGet(hm.Identifier, hm.Key))
 	}
 
 	_, err = pipe.Exec()
