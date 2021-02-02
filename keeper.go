@@ -1,6 +1,7 @@
 package cacher
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -8,6 +9,9 @@ import (
 	goredis "github.com/go-redis/redis"
 	"github.com/jpillora/backoff"
 )
+
+// ErrNotFound :nodoc:
+var ErrNotFound = errors.New("not found")
 
 const (
 	// Override these when constructing the cache keeper
@@ -20,10 +24,17 @@ const (
 
 var nilJSON = []byte("null")
 
+// HashMember :nodoc:
+type HashMember struct {
+	Identifier string
+	Key        string
+}
+
 type (
 	// RedisConnector :Cluster or Client:
 	RedisConnector interface {
 		TxPipeline() goredis.Pipeliner
+		Pipeline() goredis.Pipeliner
 
 		Get(key string) *goredis.StringCmd
 		Set(key string, value interface{}, expiration time.Duration) *goredis.StatusCmd
@@ -96,6 +107,7 @@ type (
 		StoreHashMember(string, Item) error
 		GetHashMember(identifier string, key string) (interface{}, error)
 		DeleteHashMember(identifier string, key string) error
+		GetMultiHashMembers(hashMember []HashMember) ([]interface{}, error)
 
 		// Persist
 		Persist(key string) error
@@ -412,6 +424,7 @@ func (k *keeper) getCachedItem(key string) (value interface{}, err error) {
 	if k.disableCaching {
 		return
 	}
+
 	resp, err := k.connPool.Get(key).Result()
 	switch {
 	case err != nil && err != goredis.Nil:
@@ -637,6 +650,28 @@ func (k *keeper) GetHashMember(identifier string, key string) (value interface{}
 	return
 }
 
+// GetMultiHashMembers return type is *goredis.StringCmd
+// to reduce looping and casting, so the caller is the one that should cast it
+func (k *keeper) GetMultiHashMembers(hashMember []HashMember) (replies []interface{}, err error) {
+	if k.disableCaching || len(hashMember) == 0 {
+		return
+	}
+
+	pipe := k.connPool.Pipeline()
+	defer pipe.Close()
+
+	for _, hm := range hashMember {
+		replies = append(replies, pipe.HGet(hm.Identifier, hm.Key))
+	}
+
+	_, err = pipe.Exec()
+	if err != nil && err != goredis.Nil {
+		return nil, fmt.Errorf("failed to exec pipe: %w", err)
+	}
+
+	return replies, nil
+}
+
 // DeleteHashMember :nodoc:
 func (k *keeper) DeleteHashMember(identifier string, key string) (err error) {
 	if k.disableCaching {
@@ -653,4 +688,19 @@ func (k *keeper) Persist(key string) (err error) {
 	}
 
 	return k.connPool.Persist(key).Err()
+}
+
+// GetGoredisResult :nodoc:
+func GetGoredisResult(reply interface{}) (string, error) {
+	strCMD, ok := reply.(*goredis.StringCmd)
+	if !ok {
+		return "", errors.New("")
+	}
+
+	res, err := strCMD.Result()
+	if errors.Is(err, goredis.Nil) {
+		return "", ErrNotFound
+	}
+
+	return res, nil
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/alicebob/miniredis"
 	"github.com/go-redis/redis"
+	"github.com/stretchr/testify/assert"
 )
 
 var client *redis.Client
@@ -666,4 +667,88 @@ func TestKeeper_Persist(t *testing.T) {
 	if replyDur.Val() != -1*time.Second {
 		t.Fatalf("expected: -1s, got: %d", replyDur.Val())
 	}
+}
+
+func TestKeeper_GetMultiHashMembers(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		keeper := newTestKeeper()
+		var hasMembers []HashMember
+		bucket := "bucket"
+		var members []string
+		for i := 0; i < 10; i++ {
+			key := fmt.Sprintf("key-%d", i)
+			members = append(members, key)
+			hasMembers = append(hasMembers, HashMember{
+				Identifier: bucket,
+				Key:        key,
+			})
+			err := keeper.StoreHashMember(bucket, &item{
+				key:   key,
+				ttl:   defaultTTL,
+				value: []byte(key),
+			})
+			assert.NoError(t, err)
+		}
+
+		replies, err := keeper.GetMultiHashMembers(hasMembers)
+		assert.NoError(t, err)
+
+		// make sure all keys is found
+		assert.Equal(t, len(hasMembers), len(replies))
+
+		for _, reply := range replies {
+			strCMD, ok := reply.(*redis.StringCmd)
+			assert.True(t, ok)
+			val, err := strCMD.Result()
+			assert.NoError(t, err)
+			assert.Contains(t, members, val)
+		}
+	})
+
+	t.Run("missing some keys", func(t *testing.T) {
+		keeper := newTestKeeper()
+		var hashMembers []HashMember
+		bucket := "bucket"
+		var keys []string
+		for i := 0; i < 10; i++ {
+			key := fmt.Sprintf("key-%d", i)
+			keys = append(keys, key)
+			err := keeper.StoreHashMember(bucket, &item{
+				key:   key,
+				ttl:   defaultTTL,
+				value: []byte(key),
+			})
+			assert.NoError(t, err)
+		}
+
+		keysWithMissings := make([]string, len(keys))
+		copy(keysWithMissings, keys)
+		missingKeys := []string{"11", "12", "13"}
+		keysWithMissings = append(keysWithMissings, missingKeys...)
+		for _, key := range keysWithMissings {
+			hashMembers = append(hashMembers, HashMember{
+				Identifier: bucket,
+				Key:        key,
+			})
+		}
+
+		replies, err := keeper.GetMultiHashMembers(hashMembers)
+		assert.NoError(t, err)
+		assert.Equal(t, len(hashMembers), len(replies))
+
+		// make sure replies is sorted like
+		for i := range keysWithMissings {
+			strCMD, ok := replies[i].(*redis.StringCmd)
+			assert.True(t, ok)
+			val, err := strCMD.Result()
+			if val == "" {
+				assert.EqualError(t, redis.Nil, err.Error())
+				assert.Equal(t, keysWithMissings[i], strCMD.Args()[2])
+				continue
+			}
+
+			assert.NoError(t, err)
+			assert.Equal(t, keys[i], val)
+		}
+	})
 }
