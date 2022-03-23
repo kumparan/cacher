@@ -704,3 +704,10 @@ func GetGoredisResult(reply interface{}) (string, error) {
 
 	return res, nil
 }
+
+func SafeUnlock(mutex *redislock.Lock) {
+	if mutex != nil {
+		_ = mutex.Release()
+	}
+}
+
