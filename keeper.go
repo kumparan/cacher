@@ -5,7 +5,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-redsync/redsync/v2"
+	"github.com/go-redsync/redsync/v4"
+	redigosync "github.com/go-redsync/redsync/v4/redis/redigo"
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
 )
@@ -175,11 +176,7 @@ func (k *keeper) GetOrSet(key string, fn CacheGeneratorFn, ttl time.Duration) (c
 		return
 	}
 
-	defer func() {
-		if mu != nil {
-			mu.Unlock()
-		}
-	}()
+	defer SafeUnlock(mu)
 
 	cachedItem, err = fn()
 
@@ -197,11 +194,7 @@ func (k *keeper) Store(mutex *redsync.Mutex, c Item) error {
 	if k.disableCaching {
 		return nil
 	}
-	defer func() {
-		if mutex != nil {
-			mutex.Unlock()
-		}
-	}()
+	defer SafeUnlock(mutex)
 
 	client := k.connPool.Get()
 	defer func() {
@@ -342,10 +335,11 @@ func (k *keeper) SetDisableCaching(b bool) {
 
 // AcquireLock :nodoc:
 func (k *keeper) AcquireLock(key string) (*redsync.Mutex, error) {
-	r := redsync.New([]redsync.Pool{k.lockConnPool})
+	p := redigosync.NewPool(k.lockConnPool)
+	r := redsync.New(p)
 	m := r.NewMutex("lock:"+key,
-		redsync.SetExpiry(k.lockDuration),
-		redsync.SetTries(k.lockTries))
+		redsync.WithExpiry(k.lockDuration),
+		redsync.WithTries(k.lockTries))
 
 	return m, m.Lock()
 }
@@ -361,7 +355,7 @@ func (k *keeper) DeleteByKeys(keys []string) error {
 		_ = client.Close()
 	}()
 
-	redisKeys := []interface{}{}
+	var redisKeys []interface{}
 	for _, key := range keys {
 		redisKeys = append(redisKeys, key)
 	}
@@ -686,7 +680,7 @@ func (k *keeper) StoreHashMember(identifier string, c Item) (err error) {
 	return
 }
 
-// GetOrLockHash :nodoc:
+// GetHashMemberOrLock :nodoc:
 func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem interface{}, mutex *redsync.Mutex, err error) {
 	if k.disableCaching {
 		return
@@ -740,7 +734,7 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 	return nil, nil, ErrWaitTooLong
 }
 
-// StoreHashMember :nodoc:
+// GetHashMember :nodoc:
 func (k *keeper) GetHashMember(identifier string, key string) (value interface{}, err error) {
 	if k.disableCaching {
 		return
@@ -874,7 +868,7 @@ func (k *keeper) HashScan(identifier string, cursor int64) (next int64, result m
 // SafeUnlock safely unlock mutex
 func SafeUnlock(mutex *redsync.Mutex) {
 	if mutex != nil {
-		mutex.Unlock()
+		_, _ = mutex.Unlock()
 	}
 }
 

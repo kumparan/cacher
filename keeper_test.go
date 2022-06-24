@@ -640,7 +640,7 @@ func TestGetOrLock(t *testing.T) {
 			// Make sure it's empty
 			err2 := k.DeleteByKeys([]string{key})
 			assert.NoError(t, err2)
-			mu1.Unlock()
+			_, _ = mu1.Unlock()
 		}()
 
 		t1 := time.Now()
@@ -684,7 +684,7 @@ func TestGetOrLock(t *testing.T) {
 			// Now fill it with cache
 			err2 := k.StoreWithoutBlocking(NewItem(key, testVal))
 			assert.NoError(t, err2)
-			mu1.Unlock()
+			_, _ = mu1.Unlock()
 		}()
 
 		t1 := time.Now()
@@ -785,7 +785,7 @@ func TestGetHashMemberOrLock(t *testing.T) {
 			// Make sure it's empty
 			err2 := k.DeleteByKeys([]string{id})
 			assert.NoError(t, err2)
-			mu1.Unlock()
+			_, _ = mu1.Unlock()
 		}()
 
 		t1 := time.Now()
@@ -830,7 +830,7 @@ func TestGetHashMemberOrLock(t *testing.T) {
 			// Now fill it with cache
 			err2 := k.StoreHashMember(id, NewItem(key, testVal))
 			assert.NoError(t, err2)
-			mu1.Unlock()
+			_, _ = mu1.Unlock()
 		}()
 
 		t1 := time.Now()
