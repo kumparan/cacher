@@ -144,7 +144,7 @@ func (k *keeper) Get(key string) (cachedItem any, err error) {
 		return
 	}
 
-	cachedItem, err = k.getCachedItem(key)
+	cachedItem, err = getCachedItem(k.connPool.Get(), key)
 	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
 		return
 	}
@@ -158,7 +158,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 		return
 	}
 
-	cachedItem, err = k.getCachedItem(key)
+	cachedItem, err = getCachedItem(k.connPool.Get(), key)
 	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
 		return
 	}
@@ -177,7 +177,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 		}
 
 		if !k.isLocked(key) {
-			cachedItem, err = k.getCachedItem(key)
+			cachedItem, err = getCachedItem(k.connPool.Get(), key)
 			if err != nil {
 				if err == ErrKeyNotExist {
 					mutex, err = k.AcquireLock(key)
@@ -808,37 +808,6 @@ func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
 	}
 
 	return int64(k.defaultTTL.Seconds())
-}
-
-func (k *keeper) getCachedItem(key string) (value any, err error) {
-	client := k.connPool.Get()
-	defer func() {
-		_ = client.Close()
-	}()
-
-	err = client.Send("MULTI")
-	if err != nil {
-		return nil, err
-	}
-	err = client.Send("EXISTS", key)
-	if err != nil {
-		return nil, err
-	}
-	err = client.Send("GET", key)
-	if err != nil {
-		return nil, err
-	}
-	res, err := redigo.Values(client.Do("EXEC"))
-	if err != nil {
-		return nil, err
-	}
-
-	val, ok := res[0].(int64)
-	if !ok || val <= 0 {
-		return nil, ErrKeyNotExist
-	}
-
-	return res[1], nil
 }
 
 func (k *keeper) isLocked(key string) bool {
