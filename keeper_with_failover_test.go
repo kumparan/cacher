@@ -40,6 +40,7 @@ func Test_keeperWithFailover_GetOrSet(t *testing.T) {
 		require.NoError(t, err)
 		assert.EqualValues(t, val, retVal)
 		assert.True(t, m.Exists(testKey))
+		assert.True(t, mFO.Exists(testKey))
 	})
 
 	t.Run("Already cached", func(t *testing.T) {
