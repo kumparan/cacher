@@ -214,16 +214,23 @@ func (k *keeper) GetOrSet(key string, fn GetterFn, ttl time.Duration) (cachedIte
 		return
 	}
 
+	// handle if nil value is cached
+	if mu == nil {
+		return
+	}
+
 	defer SafeUnlock(mu)
-
 	cachedItem, err = fn()
-
 	if err != nil {
 		return
 	}
 
-	err = k.Store(mu, NewItemWithCustomTTL(key, cachedItem, ttl))
+	if cachedItem == nil {
+		_ = k.StoreNil(key)
+		return
+	}
 
+	_ = k.Store(mu, NewItemWithCustomTTL(key, cachedItem, ttl))
 	return
 }
 

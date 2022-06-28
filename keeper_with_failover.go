@@ -54,11 +54,20 @@ func (k *KeeperWithFailover) GetOrSet(key string, fn GetterFn, ttl time.Duration
 		return
 	}
 
+	// handle if nil value is cached
+	if mu == nil {
+		return
+	}
 	defer SafeUnlock(mu)
 
 	cachedItem, err = fn()
 	if err != nil {
 		return k.GetFailover(key)
+	}
+
+	if cachedItem == nil {
+		err = k.StoreNil(key)
+		return
 	}
 
 	err = k.Store(mu, NewItemWithCustomTTL(key, cachedItem, ttl))
