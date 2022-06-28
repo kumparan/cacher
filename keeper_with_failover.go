@@ -66,12 +66,12 @@ func (k *KeeperWithFailover) GetOrSet(key string, fn GetterFn, ttl time.Duration
 	}
 
 	if cachedItem == nil {
-		err = k.StoreNil(key)
+		_ = k.StoreNil(key)
 		return
 	}
 
-	err = k.Store(mu, NewItemWithCustomTTL(key, cachedItem, ttl))
-	err = k.StoreFailover(mu, NewItemWithCustomTTL(key, cachedItem, k.failoverTTL))
+	_ = k.Store(mu, NewItemWithCustomTTL(key, cachedItem, ttl))
+	_ = k.StoreFailover(mu, NewItemWithCustomTTL(key, cachedItem, k.failoverTTL))
 
 	return
 }
