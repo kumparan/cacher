@@ -2,10 +2,10 @@ package cacher
 
 import (
 	"fmt"
-	"strconv"
 	"time"
 
-	"github.com/go-redsync/redsync/v2"
+	"github.com/go-redsync/redsync/v4"
+	redigosync "github.com/go-redsync/redsync/v4/redis/redigo"
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
 )
@@ -22,14 +22,14 @@ const (
 var nilJSON = []byte("null")
 
 type (
-	// CacheGeneratorFn :nodoc:
-	CacheGeneratorFn func() (interface{}, error)
+	// GetterFn :nodoc:
+	GetterFn func() (any, error)
 
 	// Keeper responsible for managing cache
 	Keeper interface {
-		Get(string) (interface{}, error)
-		GetOrLock(string) (interface{}, *redsync.Mutex, error)
-		GetOrSet(string, CacheGeneratorFn, time.Duration) (interface{}, error)
+		Get(key string) (any, error)
+		GetOrLock(key string) (any, *redsync.Mutex, error)
+		GetOrSet(key string, mtd GetterFn, ttl time.Duration) (any, error)
 		Store(*redsync.Mutex, Item) error
 		StoreWithoutBlocking(Item) error
 		StoreMultiWithoutBlocking([]Item) error
@@ -54,23 +54,23 @@ type (
 		CheckKeyExist(string) (bool, error)
 
 		//list
-		StoreRightList(string, interface{}) error
-		StoreLeftList(string, interface{}) error
-		GetList(string, int64, int64) (interface{}, error)
+		StoreRightList(string, any) error
+		StoreLeftList(string, any) error
+		GetList(string, int64, int64) (any, error)
 		GetListLength(string) (int64, error)
-		GetAndRemoveFirstListElement(string) (interface{}, error)
-		GetAndRemoveLastListElement(string) (interface{}, error)
+		GetAndRemoveFirstListElement(string) (any, error)
+		GetAndRemoveLastListElement(string) (any, error)
 
 		GetTTL(string) (int64, error)
 
 		// HASH BUCKET
-		GetHashMemberOrLock(identifier string, key string) (interface{}, *redsync.Mutex, error)
+		GetHashMemberOrLock(identifier string, key string) (any, *redsync.Mutex, error)
 		StoreHashMember(string, Item) error
 		StoreHashNilMember(identifier, cacheKey string) error
-		GetHashMember(identifier string, key string) (interface{}, error)
+		GetHashMember(identifier string, key string) (any, error)
 		DeleteHashMember(identifier string, key string) error
 		IncreaseHashMemberValue(identifier, key string, value int64) (int64, error)
-		GetHashMemberThenDelete(identifier, key string) (interface{}, error)
+		GetHashMemberThenDelete(identifier, key string) (any, error)
 		HashScan(identifier string, cursor int64) (next int64, result map[string]string, err error)
 	}
 
@@ -99,13 +99,52 @@ func NewKeeper() Keeper {
 	}
 }
 
+// SetDefaultTTL :nodoc:
+func (k *keeper) SetDefaultTTL(d time.Duration) {
+	k.defaultTTL = d
+}
+
+func (k *keeper) SetNilTTL(d time.Duration) {
+	k.nilTTL = d
+}
+
+// SetConnectionPool :nodoc:
+func (k *keeper) SetConnectionPool(c *redigo.Pool) {
+	k.connPool = c
+}
+
+// SetLockConnectionPool :nodoc:
+func (k *keeper) SetLockConnectionPool(c *redigo.Pool) {
+	k.lockConnPool = c
+}
+
+// SetLockDuration :nodoc:
+func (k *keeper) SetLockDuration(d time.Duration) {
+	k.lockDuration = d
+}
+
+// SetLockTries :nodoc:
+func (k *keeper) SetLockTries(t int) {
+	k.lockTries = t
+}
+
+// SetWaitTime :nodoc:
+func (k *keeper) SetWaitTime(d time.Duration) {
+	k.waitTime = d
+}
+
+// SetDisableCaching :nodoc:
+func (k *keeper) SetDisableCaching(b bool) {
+	k.disableCaching = b
+}
+
 // Get :nodoc:
-func (k *keeper) Get(key string) (cachedItem interface{}, err error) {
+func (k *keeper) Get(key string) (cachedItem any, err error) {
 	if k.disableCaching {
 		return
 	}
 
-	cachedItem, err = k.getCachedItem(key)
+	cachedItem, err = getCachedItem(k.connPool.Get(), key)
 	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
 		return
 	}
@@ -114,12 +153,12 @@ func (k *keeper) Get(key string) (cachedItem interface{}, err error) {
 }
 
 // GetOrLock :nodoc:
-func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redsync.Mutex, err error) {
+func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, err error) {
 	if k.disableCaching {
 		return
 	}
 
-	cachedItem, err = k.getCachedItem(key)
+	cachedItem, err = getCachedItem(k.connPool.Get(), key)
 	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
 		return
 	}
@@ -138,7 +177,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redsync.M
 		}
 
 		if !k.isLocked(key) {
-			cachedItem, err = k.getCachedItem(key)
+			cachedItem, err = getCachedItem(k.connPool.Get(), key)
 			if err != nil {
 				if err == ErrKeyNotExist {
 					mutex, err = k.AcquireLock(key)
@@ -166,7 +205,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem interface{}, mutex *redsync.M
 }
 
 // GetOrSet :nodoc:
-func (k *keeper) GetOrSet(key string, fn CacheGeneratorFn, ttl time.Duration) (cachedItem interface{}, err error) {
+func (k *keeper) GetOrSet(key string, fn GetterFn, ttl time.Duration) (cachedItem any, err error) {
 	cachedItem, mu, err := k.GetOrLock(key)
 	if err != nil {
 		return
@@ -175,20 +214,23 @@ func (k *keeper) GetOrSet(key string, fn CacheGeneratorFn, ttl time.Duration) (c
 		return
 	}
 
-	defer func() {
-		if mu != nil {
-			mu.Unlock()
-		}
-	}()
+	// handle if nil value is cached
+	if mu == nil {
+		return
+	}
 
+	defer SafeUnlock(mu)
 	cachedItem, err = fn()
-
 	if err != nil {
 		return
 	}
 
-	err = k.Store(mu, NewItemWithCustomTTL(key, cachedItem, ttl))
+	if cachedItem == nil {
+		_ = k.StoreNil(key)
+		return
+	}
 
+	_ = k.Store(mu, NewItemWithCustomTTL(key, cachedItem, ttl))
 	return
 }
 
@@ -197,11 +239,7 @@ func (k *keeper) Store(mutex *redsync.Mutex, c Item) error {
 	if k.disableCaching {
 		return nil
 	}
-	defer func() {
-		if mutex != nil {
-			mutex.Unlock()
-		}
-	}()
+	defer SafeUnlock(mutex)
 
 	client := k.connPool.Get()
 	defer func() {
@@ -252,7 +290,7 @@ func (k *keeper) Purge(matchString string) error {
 		_ = client.Close()
 	}()
 
-	var cursor interface{}
+	var cursor any
 	var stop []uint8
 	cursor = "0"
 	delCount := 0
@@ -262,7 +300,7 @@ func (k *keeper) Purge(matchString string) error {
 			return err
 		}
 		stop = res[0].([]uint8)
-		if foundKeys, ok := res[1].([]interface{}); ok {
+		if foundKeys, ok := res[1].([]any); ok {
 			if len(foundKeys) > 0 {
 				err = client.Send("DEL", foundKeys...)
 				if err != nil {
@@ -301,51 +339,13 @@ func (k *keeper) IncreaseCachedValueByOne(key string) error {
 	return err
 }
 
-// SetDefaultTTL :nodoc:
-func (k *keeper) SetDefaultTTL(d time.Duration) {
-	k.defaultTTL = d
-}
-
-func (k *keeper) SetNilTTL(d time.Duration) {
-	k.nilTTL = d
-}
-
-// SetConnectionPool :nodoc:
-func (k *keeper) SetConnectionPool(c *redigo.Pool) {
-	k.connPool = c
-}
-
-// SetLockConnectionPool :nodoc:
-func (k *keeper) SetLockConnectionPool(c *redigo.Pool) {
-	k.lockConnPool = c
-}
-
-// SetLockDuration :nodoc:
-func (k *keeper) SetLockDuration(d time.Duration) {
-	k.lockDuration = d
-}
-
-// SetLockTries :nodoc:
-func (k *keeper) SetLockTries(t int) {
-	k.lockTries = t
-}
-
-// SetWaitTime :nodoc:
-func (k *keeper) SetWaitTime(d time.Duration) {
-	k.waitTime = d
-}
-
-// SetDisableCaching :nodoc:
-func (k *keeper) SetDisableCaching(b bool) {
-	k.disableCaching = b
-}
-
 // AcquireLock :nodoc:
 func (k *keeper) AcquireLock(key string) (*redsync.Mutex, error) {
-	r := redsync.New([]redsync.Pool{k.lockConnPool})
+	p := redigosync.NewPool(k.lockConnPool)
+	r := redsync.New(p)
 	m := r.NewMutex("lock:"+key,
-		redsync.SetExpiry(k.lockDuration),
-		redsync.SetTries(k.lockTries))
+		redsync.WithExpiry(k.lockDuration),
+		redsync.WithTries(k.lockTries))
 
 	return m, m.Lock()
 }
@@ -361,7 +361,7 @@ func (k *keeper) DeleteByKeys(keys []string) error {
 		_ = client.Close()
 	}()
 
-	redisKeys := []interface{}{}
+	var redisKeys []any
 	for _, key := range keys {
 		redisKeys = append(redisKeys, key)
 	}
@@ -467,59 +467,6 @@ func (k *keeper) ExpireMulti(items map[string]time.Duration) error {
 	return err
 }
 
-func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
-	if ttl = c.GetTTLInt64(); ttl > 0 {
-		return
-	}
-
-	return int64(k.defaultTTL.Seconds())
-}
-
-func (k *keeper) getCachedItem(key string) (value interface{}, err error) {
-	client := k.connPool.Get()
-	defer func() {
-		_ = client.Close()
-	}()
-
-	err = client.Send("MULTI")
-	if err != nil {
-		return nil, err
-	}
-	err = client.Send("EXISTS", key)
-	if err != nil {
-		return nil, err
-	}
-	err = client.Send("GET", key)
-	if err != nil {
-		return nil, err
-	}
-	res, err := redigo.Values(client.Do("EXEC"))
-	if err != nil {
-		return nil, err
-	}
-
-	val, ok := res[0].(int64)
-	if !ok || val <= 0 {
-		return nil, ErrKeyNotExist
-	}
-
-	return res[1], nil
-}
-
-func (k *keeper) isLocked(key string) bool {
-	client := k.lockConnPool.Get()
-	defer func() {
-		_ = client.Close()
-	}()
-
-	reply, err := client.Do("GET", "lock:"+key)
-	if err != nil || reply == nil {
-		return false
-	}
-
-	return true
-}
-
 // CheckKeyExist :nodoc:
 func (k *keeper) CheckKeyExist(key string) (value bool, err error) {
 
@@ -538,7 +485,7 @@ func (k *keeper) CheckKeyExist(key string) (value bool, err error) {
 }
 
 // StoreRightList :nodoc:
-func (k *keeper) StoreRightList(name string, value interface{}) error {
+func (k *keeper) StoreRightList(name string, value any) error {
 	client := k.connPool.Get()
 	defer func() {
 		_ = client.Close()
@@ -550,7 +497,7 @@ func (k *keeper) StoreRightList(name string, value interface{}) error {
 }
 
 // StoreLeftList :nodoc:
-func (k *keeper) StoreLeftList(name string, value interface{}) error {
+func (k *keeper) StoreLeftList(name string, value any) error {
 	client := k.connPool.Get()
 	defer func() {
 		_ = client.Close()
@@ -573,7 +520,7 @@ func (k *keeper) GetListLength(name string) (value int64, err error) {
 	return
 }
 
-func (k *keeper) GetAndRemoveFirstListElement(name string) (value interface{}, err error) {
+func (k *keeper) GetAndRemoveFirstListElement(name string) (value any, err error) {
 	client := k.connPool.Get()
 	defer func() {
 		_ = client.Close()
@@ -592,7 +539,7 @@ func (k *keeper) GetAndRemoveFirstListElement(name string) (value interface{}, e
 	return
 }
 
-func (k *keeper) GetAndRemoveLastListElement(name string) (value interface{}, err error) {
+func (k *keeper) GetAndRemoveLastListElement(name string) (value any, err error) {
 	client := k.connPool.Get()
 	defer func() {
 		_ = client.Close()
@@ -611,7 +558,7 @@ func (k *keeper) GetAndRemoveLastListElement(name string) (value interface{}, er
 	return
 }
 
-func (k *keeper) GetList(name string, size int64, page int64) (value interface{}, err error) {
+func (k *keeper) GetList(name string, size int64, page int64) (value any, err error) {
 	offset := getOffset(page, size)
 
 	client := k.connPool.Get()
@@ -649,15 +596,6 @@ func (k *keeper) GetTTL(name string) (value int64, err error) {
 	return
 }
 
-// getOffset to get offset from page and limit, min value for page = 1
-func getOffset(page, limit int64) int64 {
-	offset := (page - 1) * limit
-	if offset < 0 {
-		return 0
-	}
-	return offset
-}
-
 // StoreHashMember :nodoc:
 func (k *keeper) StoreHashMember(identifier string, c Item) (err error) {
 	if k.disableCaching {
@@ -686,8 +624,8 @@ func (k *keeper) StoreHashMember(identifier string, c Item) (err error) {
 	return
 }
 
-// GetOrLockHash :nodoc:
-func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem interface{}, mutex *redsync.Mutex, err error) {
+// GetHashMemberOrLock :nodoc:
+func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem any, mutex *redsync.Mutex, err error) {
 	if k.disableCaching {
 		return
 	}
@@ -740,8 +678,8 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 	return nil, nil, ErrWaitTooLong
 }
 
-// StoreHashMember :nodoc:
-func (k *keeper) GetHashMember(identifier string, key string) (value interface{}, err error) {
+// GetHashMember :nodoc:
+func (k *keeper) GetHashMember(identifier string, key string) (value any, err error) {
 	if k.disableCaching {
 		return
 	}
@@ -812,7 +750,7 @@ func (k *keeper) IncreaseHashMemberValue(identifier, key string, value int64) (i
 }
 
 // GetHashMemberThenDelete :nodoc:
-func (k *keeper) GetHashMemberThenDelete(identifier string, key string) (interface{}, error) {
+func (k *keeper) GetHashMemberThenDelete(identifier string, key string) (any, error) {
 	if k.disableCaching {
 		return nil, nil
 	}
@@ -871,31 +809,24 @@ func (k *keeper) HashScan(identifier string, cursor int64) (next int64, result m
 	return
 }
 
-// SafeUnlock safely unlock mutex
-func SafeUnlock(mutex *redsync.Mutex) {
-	if mutex != nil {
-		mutex.Unlock()
+func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
+	if ttl = c.GetTTLInt64(); ttl > 0 {
+		return
 	}
+
+	return int64(k.defaultTTL.Seconds())
 }
 
-// parse result return from scan
-// the index 0 is the cursor
-// and the rest is the elements
-func parseScanResults(results []interface{}) (cursor int64, elements []string, err error) {
-	if len(results) != 2 {
-		return
+func (k *keeper) isLocked(key string) bool {
+	client := k.lockConnPool.Get()
+	defer func() {
+		_ = client.Close()
+	}()
+
+	reply, err := client.Do("GET", "lock:"+key)
+	if err != nil || reply == nil {
+		return false
 	}
 
-	cursor, err = strconv.ParseInt(string(results[0].([]byte)), 10, 64)
-	if err != nil {
-		return
-	}
-
-	elementsInterface := results[1].([]interface{})
-	elements = make([]string, len(elementsInterface))
-	for index, keyInterface := range elementsInterface {
-		elements[index] = string(keyInterface.([]byte))
-	}
-
-	return
+	return true
 }
