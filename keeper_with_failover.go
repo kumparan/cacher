@@ -3,9 +3,8 @@ package cacher
 import (
 	"time"
 
-	"github.com/go-redsync/redsync/v4"
-
 	redigo "github.com/gomodule/redigo/redis"
+	"github.com/kumparan/redsync/v4"
 )
 
 const (

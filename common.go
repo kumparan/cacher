@@ -4,8 +4,7 @@ import (
 	"strconv"
 
 	redigo "github.com/gomodule/redigo/redis"
-
-	"github.com/go-redsync/redsync/v4"
+	"github.com/kumparan/redsync/v4"
 )
 
 // SafeUnlock safely unlock mutex

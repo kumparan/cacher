@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-redsync/redsync/v4"
-	redigosync "github.com/go-redsync/redsync/v4/redis/redigo"
+	"github.com/kumparan/redsync/v4"
+
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
+	redigosync "github.com/kumparan/redsync/v4/redis/redigo"
 )
 
 const (
