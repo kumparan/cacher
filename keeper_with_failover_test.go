@@ -34,7 +34,7 @@ func Test_keeperWithFailover_GetOrSet(t *testing.T) {
 		assert.False(t, m.Exists(testKey))
 
 		ttl := 1600 * time.Second
-		retVal, err := k.GetOrSet(testKey, func() (i interface{}, e error) {
+		retVal, err := k.GetOrSet(testKey, func() (i any, e error) {
 			return val, nil
 		}, ttl)
 		require.NoError(t, err)
@@ -47,7 +47,7 @@ func Test_keeperWithFailover_GetOrSet(t *testing.T) {
 		testKey := "just-a-key"
 		assert.True(t, m.Exists(testKey))
 		ttl := 1600 * time.Second
-		retVal, err := k.GetOrSet(testKey, func() (i interface{}, e error) {
+		retVal, err := k.GetOrSet(testKey, func() (i any, e error) {
 			return "thisis-not-expected", nil
 		}, ttl)
 		require.NoError(t, err)
@@ -62,7 +62,7 @@ func Test_keeperWithFailover_GetOrSet(t *testing.T) {
 		require.NoError(t, err)
 
 		ttl := 1600 * time.Second
-		retVal, err := k.GetOrSet(testKey, func() (i interface{}, e error) {
+		retVal, err := k.GetOrSet(testKey, func() (i any, e error) {
 			return nil, errors.New("error")
 		}, ttl)
 		require.NoError(t, err)

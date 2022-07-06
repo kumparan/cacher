@@ -9,18 +9,18 @@ type (
 	Item interface {
 		GetTTLInt64() int64
 		GetKey() string
-		GetValue() interface{}
+		GetValue() any
 	}
 
 	item struct {
 		key   string
-		value interface{}
+		value any
 		ttl   time.Duration
 	}
 )
 
 // NewItem :nodoc:
-func NewItem(key string, value interface{}) Item {
+func NewItem(key string, value any) Item {
 	return &item{
 		key:   key,
 		value: value,
@@ -28,7 +28,7 @@ func NewItem(key string, value interface{}) Item {
 }
 
 // NewItemWithCustomTTL :nodoc:
-func NewItemWithCustomTTL(key string, value interface{}, customTTL time.Duration) Item {
+func NewItemWithCustomTTL(key string, value any, customTTL time.Duration) Item {
 	return &item{
 		key:   key,
 		value: value,
@@ -47,6 +47,6 @@ func (i *item) GetKey() string {
 }
 
 // GetValue :nodoc:
-func (i *item) GetValue() interface{} {
+func (i *item) GetValue() any {
 	return i.value
 }

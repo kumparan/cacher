@@ -2,3 +2,4 @@
 .vscode
 .idea
 vendor
+/common_test.go

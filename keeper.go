@@ -2,9 +2,11 @@ package cacher
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/kumparan/redsync/v4"
+	"github.com/kumparan/tapao"
 
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
@@ -18,9 +20,13 @@ const (
 	defaultLockDuration = 1 * time.Minute
 	defaultLockTries    = 1
 	defaultWaitTime     = 15 * time.Second
+	defaultSerializer   = tapao.JSON
 )
 
-var nilJSON = []byte("null")
+var nilValue = map[tapao.SerializerType][]byte{
+	tapao.JSON:        []byte("null"),
+	tapao.MessagePack: []byte("192"),
+}
 
 type (
 	// GetterFn :nodoc:
@@ -30,7 +36,7 @@ type (
 	Keeper interface {
 		Get(key string) (any, error)
 		GetOrLock(key string) (any, *redsync.Mutex, error)
-		GetOrSet(key string, mtd GetterFn, ttl time.Duration) (any, error)
+		GetOrSet(item any, key string, fn GetterFn, ttl time.Duration) error
 		Store(*redsync.Mutex, Item) error
 		StoreWithoutBlocking(Item) error
 		StoreMultiWithoutBlocking([]Item) error
@@ -51,6 +57,7 @@ type (
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
 		SetDisableCaching(bool)
+		SetSerializer(t tapao.SerializerType)
 
 		CheckKeyExist(string) (bool, error)
 
@@ -85,6 +92,8 @@ type (
 		lockConnPool *redigo.Pool
 		lockDuration time.Duration
 		lockTries    int
+
+		serializer tapao.SerializerType
 	}
 )
 
@@ -97,6 +106,7 @@ func NewKeeper() Keeper {
 		lockTries:      defaultLockTries,
 		waitTime:       defaultWaitTime,
 		disableCaching: false,
+		serializer:     defaultSerializer,
 	}
 }
 
@@ -137,6 +147,11 @@ func (k *keeper) SetWaitTime(d time.Duration) {
 // SetDisableCaching :nodoc:
 func (k *keeper) SetDisableCaching(b bool) {
 	k.disableCaching = b
+}
+
+// SetSerializer :nodoc:
+func (k *keeper) SetSerializer(t tapao.SerializerType) {
+	k.serializer = t
 }
 
 // Get :nodoc:
@@ -206,12 +221,16 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 }
 
 // GetOrSet :nodoc:
-func (k *keeper) GetOrSet(key string, fn GetterFn, ttl time.Duration) (cachedItem any, err error) {
-	cachedItem, mu, err := k.GetOrLock(key)
+func (k *keeper) GetOrSet(item any, key string, fn GetterFn, ttl time.Duration) (err error) {
+	cachedValue, mu, err := k.GetOrLock(key)
 	if err != nil {
 		return
 	}
-	if cachedItem != nil {
+	if cachedValue != nil {
+		err = tapao.Unmarshal(cachedValue.([]byte), &item, tapao.With(k.serializer))
+		if err != nil {
+			return
+		}
 		return
 	}
 
@@ -221,17 +240,28 @@ func (k *keeper) GetOrSet(key string, fn GetterFn, ttl time.Duration) (cachedIte
 	}
 
 	defer SafeUnlock(mu)
-	cachedItem, err = fn()
+	getterValue, err := fn()
 	if err != nil {
 		return
 	}
 
-	if cachedItem == nil {
+	if getterValue == nil {
 		_ = k.StoreNil(key)
 		return
 	}
 
-	_ = k.Store(mu, NewItemWithCustomTTL(key, cachedItem, ttl))
+	value := reflect.ValueOf(getterValue)
+	itemType := reflect.TypeOf(item)
+
+	fmt.Println("item type", itemType)
+	reflect.ValueOf(item).Set(value)
+
+	cachedValue, err = tapao.Marshal(getterValue, tapao.With(k.serializer))
+	if err != nil {
+		return
+	}
+
+	_ = k.Store(mu, NewItemWithCustomTTL(key, getterValue, ttl))
 	return
 }
 
@@ -268,14 +298,14 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 
 // StoreNil :nodoc:
 func (k *keeper) StoreNil(cacheKey string) error {
-	item := NewItemWithCustomTTL(cacheKey, nilJSON, k.nilTTL)
+	item := NewItemWithCustomTTL(cacheKey, nilValue[k.serializer], k.nilTTL)
 	err := k.StoreWithoutBlocking(item)
 	return err
 }
 
 // StoreHashNilMember :nodoc:
 func (k *keeper) StoreHashNilMember(identifier, cacheKey string) error {
-	item := NewItemWithCustomTTL(cacheKey, nilJSON, k.nilTTL)
+	item := NewItemWithCustomTTL(cacheKey, nilValue[k.serializer], k.nilTTL)
 	err := k.StoreHashMember(identifier, item)
 	return err
 }

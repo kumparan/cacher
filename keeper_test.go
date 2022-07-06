@@ -7,11 +7,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kumparan/tapao"
+	"github.com/stretchr/testify/require"
+
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/alicebob/miniredis/v2"
 )
+
+type TestStruct struct {
+	TestString     string
+	TestInt64      int64
+	TestFloat64    float64
+	TestTime       time.Time
+	TestNilString  *string
+	TestNilInt64   *int64
+	TestNilFloat64 *float64
+	TestNilTime    *time.Time
+}
 
 func newRedisConn(url string) *redigo.Pool {
 	return &redigo.Pool{
@@ -139,31 +153,50 @@ func TestGetOrSet(t *testing.T) {
 	k.SetConnectionPool(r)
 	k.SetLockConnectionPool(r)
 
-	val := "hey this is the result"
+	val := TestStruct{
+		TestString:     "string",
+		TestInt64:      1640995120740899877,
+		TestFloat64:    234.23324,
+		TestTime:       time.UnixMilli(3276483223),
+		TestNilString:  nil,
+		TestNilInt64:   nil,
+		TestNilFloat64: nil,
+		TestNilTime:    nil,
+	}
+
+	valByte, err := tapao.Marshal(val, tapao.With(tapao.JSON))
+	require.NoError(t, err)
 
 	t.Run("No cache", func(t *testing.T) {
 		testKey := "just-a-key"
 		assert.False(t, m.Exists(testKey))
 
 		ttl := 1600 * time.Second
-		retVal, err := k.GetOrSet(testKey, func() (i interface{}, e error) {
+		var retVal TestStruct
+		err := k.GetOrSet(&retVal, testKey, func() (any, error) {
 			return val, nil
 		}, ttl)
 		assert.NoError(t, err)
 		assert.EqualValues(t, val, retVal)
 		assert.True(t, m.Exists(testKey))
+
+		cachedValue, err := m.Get(testKey)
+		require.NoError(t, err)
+		assert.Equal(t, string(valByte), cachedValue)
 	})
 
 	t.Run("Already cached", func(t *testing.T) {
 		testKey := "just-a-key"
-		assert.True(t, m.Exists(testKey))
+		err := m.Set(testKey, string(valByte))
+		require.NoError(t, err)
+
 		ttl := 1600 * time.Second
-		retVal, err := k.GetOrSet(testKey, func() (i interface{}, e error) {
+		var retVal TestStruct
+		err = k.GetOrSet(&retVal, testKey, func() (any, error) {
 			return "thisis-not-expected", nil
 		}, ttl)
 		assert.NoError(t, err)
 		assert.EqualValues(t, val, retVal)
-		assert.True(t, m.Exists(testKey))
 	})
 }
 
@@ -179,7 +212,7 @@ func TestPurge(t *testing.T) {
 	k.SetLockConnectionPool(r)
 
 	// It should purge keys match with the matchstring while leaving the rest untouched
-	testKeys := map[string]interface{}{
+	testKeys := map[string]any{
 		"story:1234:comment:4321": nil,
 		"story:1234:comment:4231": nil,
 		"story:1234:comment:4121": nil,
@@ -271,7 +304,7 @@ func TestDeleteByKeys(t *testing.T) {
 	k.SetLockConnectionPool(r)
 
 	// It should purge keys match with the matchstring while leaving the rest untouched
-	testKeys := map[string]interface{}{
+	testKeys := map[string]any{
 		"story:1234:comment:4321": "anything",
 		"story:1234:comment:4231": "anything",
 		"story:1234:comment:4121": "anything",
@@ -323,7 +356,7 @@ func TestStoreMultiWithoutBlocking(t *testing.T) {
 	k.SetLockConnectionPool(r)
 
 	// It should purge keys match with the matchstring while leaving the rest untouched
-	testKeys := map[string]interface{}{
+	testKeys := map[string]any{
 		"story:1234:comment:4321": "anything1",
 		"story:1234:comment:4231": "anything2",
 		"story:1234:comment:4121": "anything3",
