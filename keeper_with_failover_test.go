@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kumparan/tapao"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/alicebob/miniredis/v2"
@@ -27,45 +29,75 @@ func Test_keeperWithFailover_GetOrSet(t *testing.T) {
 	k.SetLockConnectionPool(r)
 	k.SetFailoverConnectionPool(rFO)
 
-	val := "hey this is the result"
+	val := TestStruct{
+		TestString:     "string",
+		TestInt64:      1640995120740899877,
+		TestFloat64:    234.23324,
+		TestTime:       time.UnixMilli(3276483223),
+		TestNilString:  nil,
+		TestNilInt64:   nil,
+		TestNilFloat64: nil,
+		TestNilTime:    nil,
+	}
+
+	valByte, err := tapao.Marshal(val, tapao.With(tapao.JSON))
+	require.NoError(t, err)
 
 	t.Run("No cache", func(t *testing.T) {
 		testKey := "just-a-key"
 		assert.False(t, m.Exists(testKey))
 
-		ttl := 1600 * time.Second
-		retVal, err := k.GetOrSet(testKey, func() (i any, e error) {
+		retVal, err := k.GetOrSet(testKey, func() (any, error) {
 			return val, nil
-		}, ttl)
+		})
 		require.NoError(t, err)
-		assert.EqualValues(t, val, retVal)
+
+		var myVar TestStruct
+		err = tapao.Unmarshal(retVal, &myVar, tapao.With(tapao.JSON))
+		require.NoError(t, err)
+
+		assert.EqualValues(t, val, myVar)
+		assert.True(t, m.Exists(testKey))
+
+		cachedValue, err := m.Get(testKey)
+		require.NoError(t, err)
+		assert.Equal(t, string(valByte), cachedValue)
+
 		assert.True(t, m.Exists(testKey))
 		assert.True(t, mFO.Exists(testKey))
 	})
 
 	t.Run("Already cached", func(t *testing.T) {
 		testKey := "just-a-key"
-		assert.True(t, m.Exists(testKey))
-		ttl := 1600 * time.Second
-		retVal, err := k.GetOrSet(testKey, func() (i any, e error) {
-			return "thisis-not-expected", nil
-		}, ttl)
+		err := m.Set(testKey, string(valByte))
 		require.NoError(t, err)
-		assert.EqualValues(t, val, retVal)
-		assert.True(t, m.Exists(testKey))
+
+		retVal, err := k.GetOrSet(testKey, func() (any, error) {
+			return "thisis-not-expected", nil
+		})
+		require.NoError(t, err)
+
+		var myVar TestStruct
+		err = tapao.Unmarshal(retVal, &myVar, tapao.With(tapao.JSON))
+		require.NoError(t, err)
+
+		assert.EqualValues(t, val, myVar)
 	})
 
 	t.Run("use failover", func(t *testing.T) {
 		testKey := "just-a-key-failover"
 		assert.False(t, m.Exists(testKey))
-		err = mFO.Set(testKey, val)
+		err = mFO.Set(testKey, string(valByte))
 		require.NoError(t, err)
 
-		ttl := 1600 * time.Second
 		retVal, err := k.GetOrSet(testKey, func() (i any, e error) {
 			return nil, errors.New("error")
-		}, ttl)
+		})
 		require.NoError(t, err)
-		assert.EqualValues(t, val, retVal)
+
+		var myVar TestStruct
+		err = tapao.Unmarshal(retVal, &myVar, tapao.With(tapao.JSON))
+		require.NoError(t, err)
+		assert.EqualValues(t, val, myVar)
 	})
 }

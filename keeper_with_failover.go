@@ -1,7 +1,10 @@
 package cacher
 
 import (
+	"errors"
 	"time"
+
+	"github.com/kumparan/tapao"
 
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/kumparan/redsync/v4"
@@ -28,6 +31,7 @@ func NewKeeperWithFailover() *KeeperWithFailover {
 			lockTries:      defaultLockTries,
 			waitTime:       defaultWaitTime,
 			disableCaching: false,
+			serializer:     defaultSerializer,
 		},
 		failoverTTL: defaultFailoverTTL,
 	}
@@ -44,13 +48,18 @@ func (k *KeeperWithFailover) SetFailoverConnectionPool(c *redigo.Pool) {
 }
 
 // GetOrSet :nodoc:
-func (k *KeeperWithFailover) GetOrSet(key string, fn GetterFn, ttl time.Duration) (cachedItem any, err error) {
-	cachedItem, mu, err := k.GetOrLock(key)
+func (k *KeeperWithFailover) GetOrSet(key string, fn GetterFn, opts ...func(Item)) (res []byte, err error) {
+	cachedValue, mu, err := k.GetOrLock(key)
 	if err != nil {
 		return
 	}
-	if cachedItem != nil {
-		return
+	if cachedValue != nil {
+		res, ok := cachedValue.([]byte)
+		if !ok {
+			return nil, errors.New("invalid cache value")
+		}
+
+		return res, nil
 	}
 
 	// handle if nil value is cached
@@ -59,20 +68,34 @@ func (k *KeeperWithFailover) GetOrSet(key string, fn GetterFn, ttl time.Duration
 	}
 	defer SafeUnlock(mu)
 
-	cachedItem, err = fn()
+	item, err := fn()
 	if err != nil {
-		return k.GetFailover(key)
+		cachedValue, err = k.GetFailover(key)
+		if err != nil {
+			return nil, err
+		}
+
+		return cachedValue.([]byte), nil
 	}
 
-	if cachedItem == nil {
+	if item == nil {
 		_ = k.StoreNil(key)
 		return
 	}
 
-	_ = k.Store(mu, NewItemWithCustomTTL(key, cachedItem, ttl))
-	_ = k.StoreFailover(mu, NewItemWithCustomTTL(key, cachedItem, k.failoverTTL))
+	cachedValue, err = tapao.Marshal(item, tapao.With(k.serializer))
+	if err != nil {
+		return
+	}
 
-	return
+	cacheItem := NewItem(key, cachedValue)
+	for _, o := range opts {
+		o(cacheItem)
+	}
+	_ = k.Store(mu, cacheItem)
+	_ = k.StoreFailover(mu, NewItemWithCustomTTL(key, cachedValue, k.failoverTTL))
+
+	return cachedValue.([]byte), nil
 }
 
 // GetFailover :nodoc:

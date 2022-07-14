@@ -7,6 +7,7 @@ require (
 	github.com/gomodule/redigo v1.8.8
 	github.com/jpillora/backoff v1.0.0
 	github.com/kumparan/redsync/v4 v4.0.0-20220629071359-52de590a1465
+	github.com/kumparan/tapao v1.2.0
 	github.com/stretchr/testify v1.7.5
 )
 
@@ -16,7 +17,6 @@ require (
 	github.com/go-redsync/redsync/v4 v4.5.1 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.0 // indirect
-	github.com/kumparan/tapao v1.2.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.3.5 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect

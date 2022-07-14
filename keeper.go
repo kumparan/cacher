@@ -1,8 +1,8 @@
 package cacher
 
 import (
+	"errors"
 	"fmt"
-	"reflect"
 	"time"
 
 	"github.com/kumparan/redsync/v4"
@@ -36,7 +36,7 @@ type (
 	Keeper interface {
 		Get(key string) (any, error)
 		GetOrLock(key string) (any, *redsync.Mutex, error)
-		GetOrSet(item any, key string, fn GetterFn, ttl time.Duration) error
+		GetOrSet(key string, fn GetterFn, opts ...func(Item)) ([]byte, error)
 		Store(*redsync.Mutex, Item) error
 		StoreWithoutBlocking(Item) error
 		StoreMultiWithoutBlocking([]Item) error
@@ -221,17 +221,18 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 }
 
 // GetOrSet :nodoc:
-func (k *keeper) GetOrSet(item any, key string, fn GetterFn, ttl time.Duration) (err error) {
+func (k *keeper) GetOrSet(key string, fn GetterFn, opts ...func(Item)) (res []byte, err error) {
 	cachedValue, mu, err := k.GetOrLock(key)
 	if err != nil {
 		return
 	}
 	if cachedValue != nil {
-		err = tapao.Unmarshal(cachedValue.([]byte), &item, tapao.With(k.serializer))
-		if err != nil {
-			return
+		res, ok := cachedValue.([]byte)
+		if !ok {
+			return nil, errors.New("invalid cache value")
 		}
-		return
+
+		return res, nil
 	}
 
 	// handle if nil value is cached
@@ -240,29 +241,27 @@ func (k *keeper) GetOrSet(item any, key string, fn GetterFn, ttl time.Duration) 
 	}
 
 	defer SafeUnlock(mu)
-	getterValue, err := fn()
+	item, err := fn()
 	if err != nil {
 		return
 	}
 
-	if getterValue == nil {
+	if item == nil {
 		_ = k.StoreNil(key)
 		return
 	}
 
-	value := reflect.ValueOf(getterValue)
-	itemType := reflect.TypeOf(item)
-
-	fmt.Println("item type", itemType)
-	reflect.ValueOf(item).Set(value)
-
-	cachedValue, err = tapao.Marshal(getterValue, tapao.With(k.serializer))
+	cachedValue, err = tapao.Marshal(item, tapao.With(k.serializer))
 	if err != nil {
 		return
 	}
 
-	_ = k.Store(mu, NewItemWithCustomTTL(key, getterValue, ttl))
-	return
+	cacheItem := NewItem(key, cachedValue)
+	for _, o := range opts {
+		o(cacheItem)
+	}
+	_ = k.Store(mu, cacheItem)
+	return cachedValue.([]byte), nil
 }
 
 // Store :nodoc:

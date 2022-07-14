@@ -171,18 +171,22 @@ func TestGetOrSet(t *testing.T) {
 		testKey := "just-a-key"
 		assert.False(t, m.Exists(testKey))
 
-		ttl := 1600 * time.Second
-		var retVal TestStruct
-		err := k.GetOrSet(&retVal, testKey, func() (any, error) {
+		retVal, err := k.GetOrSet(testKey, func() (any, error) {
 			return val, nil
-		}, ttl)
-		assert.NoError(t, err)
-		assert.EqualValues(t, val, retVal)
+		})
+		require.NoError(t, err)
+
+		var myVar TestStruct
+		err = tapao.Unmarshal(retVal, &myVar, tapao.With(tapao.JSON))
+		require.NoError(t, err)
+
+		assert.EqualValues(t, val, myVar)
 		assert.True(t, m.Exists(testKey))
 
 		cachedValue, err := m.Get(testKey)
 		require.NoError(t, err)
 		assert.Equal(t, string(valByte), cachedValue)
+		assert.True(t, m.Exists(testKey))
 	})
 
 	t.Run("Already cached", func(t *testing.T) {
@@ -190,13 +194,16 @@ func TestGetOrSet(t *testing.T) {
 		err := m.Set(testKey, string(valByte))
 		require.NoError(t, err)
 
-		ttl := 1600 * time.Second
-		var retVal TestStruct
-		err = k.GetOrSet(&retVal, testKey, func() (any, error) {
+		retVal, err := k.GetOrSet(testKey, func() (any, error) {
 			return "thisis-not-expected", nil
-		}, ttl)
-		assert.NoError(t, err)
-		assert.EqualValues(t, val, retVal)
+		})
+		require.NoError(t, err)
+
+		var myVar TestStruct
+		err = tapao.Unmarshal(retVal, &myVar, tapao.With(tapao.JSON))
+		require.NoError(t, err)
+
+		assert.EqualValues(t, val, myVar)
 	})
 }
 
