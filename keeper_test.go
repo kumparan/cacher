@@ -205,6 +205,84 @@ func TestGetOrSet(t *testing.T) {
 
 		assert.EqualValues(t, val, myVar)
 	})
+
+	t.Run("Already cached, nil value", func(t *testing.T) {
+		testKey := "just-a-key-nil"
+		err := m.Set(testKey, "null")
+		require.NoError(t, err)
+
+		retVal, err := k.GetOrSet(testKey, func() (any, error) {
+			return "thisis-not-expected", nil
+		})
+		require.NoError(t, err)
+
+		var myVar *TestStruct
+		err = tapao.Unmarshal(retVal, &myVar, tapao.With(tapao.JSON))
+		require.NoError(t, err)
+
+		assert.Nil(t, myVar)
+	})
+}
+
+func TestGetHashMemberOrSet(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	val := TestStruct{
+		TestString:     "string",
+		TestInt64:      1640995120740899877,
+		TestFloat64:    234.23324,
+		TestTime:       time.UnixMilli(3276483223),
+		TestNilString:  nil,
+		TestNilInt64:   nil,
+		TestNilFloat64: nil,
+		TestNilTime:    nil,
+	}
+
+	valByte, err := tapao.Marshal(val, tapao.With(tapao.JSON))
+	require.NoError(t, err)
+
+	identifier := "this-is-identifier"
+
+	t.Run("No cache", func(t *testing.T) {
+		testKey := "just-a-key"
+		retVal, err := k.GetHashMemberOrSet(identifier, testKey, func() (any, error) {
+			return val, nil
+		})
+		require.NoError(t, err)
+
+		var myVar TestStruct
+		err = tapao.Unmarshal(retVal, &myVar, tapao.With(tapao.JSON))
+		require.NoError(t, err)
+
+		assert.EqualValues(t, val, myVar)
+
+		cachedValue := m.HGet(identifier, testKey)
+		assert.Equal(t, string(valByte), cachedValue)
+	})
+
+	t.Run("Already cached", func(t *testing.T) {
+		testKey := "just-a-key"
+		m.HSet(identifier, testKey, string(valByte))
+
+		retVal, err := k.GetHashMemberOrSet(identifier, testKey, func() (any, error) {
+			return "thisis-not-expected", nil
+		})
+		require.NoError(t, err)
+
+		var myVar TestStruct
+		err = tapao.Unmarshal(retVal, &myVar, tapao.With(tapao.JSON))
+		require.NoError(t, err)
+
+		assert.EqualValues(t, val, myVar)
+	})
 }
 
 func TestPurge(t *testing.T) {

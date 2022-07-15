@@ -73,6 +73,7 @@ type (
 
 		// HASH BUCKET
 		GetHashMemberOrLock(identifier string, key string) (any, *redsync.Mutex, error)
+		GetHashMemberOrSet(identifier, key string, fn GetterFn, opts ...func(Item)) ([]byte, error)
 		StoreHashMember(string, Item) error
 		StoreHashNilMember(identifier, cacheKey string) error
 		GetHashMember(identifier string, key string) (any, error)
@@ -160,7 +161,7 @@ func (k *keeper) Get(key string) (cachedItem any, err error) {
 		return
 	}
 
-	cachedItem, err = getCachedItem(k.connPool.Get(), key)
+	cachedItem, err = get(k.connPool.Get(), key)
 	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
 		return
 	}
@@ -174,7 +175,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 		return
 	}
 
-	cachedItem, err = getCachedItem(k.connPool.Get(), key)
+	cachedItem, err = get(k.connPool.Get(), key)
 	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
 		return
 	}
@@ -193,7 +194,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 		}
 
 		if !k.isLocked(key) {
-			cachedItem, err = getCachedItem(k.connPool.Get(), key)
+			cachedItem, err = get(k.connPool.Get(), key)
 			if err != nil {
 				if err == ErrKeyNotExist {
 					mutex, err = k.AcquireLock(key)
@@ -708,6 +709,50 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 	return nil, nil, ErrWaitTooLong
 }
 
+// GetHashMemberOrSet :nodoc:
+func (k *keeper) GetHashMemberOrSet(identifier, key string, fn GetterFn, opts ...func(Item)) (res []byte, err error) {
+	cachedValue, mu, err := k.GetHashMemberOrLock(identifier, key)
+	if err != nil {
+		return
+	}
+	if cachedValue != nil {
+		res, ok := cachedValue.([]byte)
+		if !ok {
+			return nil, errors.New("invalid cache value")
+		}
+
+		return res, nil
+	}
+
+	// handle if nil value is cached
+	if mu == nil {
+		return
+	}
+
+	defer SafeUnlock(mu)
+	item, err := fn()
+	if err != nil {
+		return
+	}
+
+	if item == nil {
+		_ = k.StoreHashNilMember(identifier, key)
+		return
+	}
+
+	cachedValue, err = tapao.Marshal(item, tapao.With(k.serializer))
+	if err != nil {
+		return
+	}
+
+	cacheItem := NewItem(key, cachedValue)
+	for _, o := range opts {
+		o(cacheItem)
+	}
+	_ = k.StoreHashMember(identifier, cacheItem)
+	return cachedValue.([]byte), nil
+}
+
 // GetHashMember :nodoc:
 func (k *keeper) GetHashMember(identifier string, key string) (value any, err error) {
 	if k.disableCaching {
@@ -719,29 +764,7 @@ func (k *keeper) GetHashMember(identifier string, key string) (value any, err er
 		_ = client.Close()
 	}()
 
-	err = client.Send("MULTI")
-	if err != nil {
-		return nil, err
-	}
-	err = client.Send("HEXISTS", identifier, key)
-	if err != nil {
-		return nil, err
-	}
-	err = client.Send("HGET", identifier, key)
-	if err != nil {
-		return nil, err
-	}
-	res, err := redigo.Values(client.Do("EXEC"))
-	if err != nil {
-		return nil, err
-	}
-
-	val, ok := res[0].(int64)
-	if !ok || val <= 0 {
-		return nil, ErrKeyNotExist
-	}
-
-	return res[1], nil
+	return getHashMember(client, identifier, key)
 }
 
 // DeleteHashMember :nodoc:

@@ -7,7 +7,6 @@ import (
 	"github.com/kumparan/tapao"
 
 	redigo "github.com/gomodule/redigo/redis"
-	"github.com/kumparan/redsync/v4"
 )
 
 const (
@@ -92,8 +91,8 @@ func (k *KeeperWithFailover) GetOrSet(key string, fn GetterFn, opts ...func(Item
 	for _, o := range opts {
 		o(cacheItem)
 	}
-	_ = k.Store(mu, cacheItem)
-	_ = k.StoreFailover(mu, NewItemWithCustomTTL(key, cachedValue, k.failoverTTL))
+	_ = k.StoreWithoutBlocking(cacheItem)
+	_ = k.StoreFailover(cacheItem)
 
 	return cachedValue.([]byte), nil
 }
@@ -104,7 +103,7 @@ func (k *KeeperWithFailover) GetFailover(key string) (cachedItem any, err error)
 		return
 	}
 
-	cachedItem, err = getCachedItem(k.failoverConnPool.Get(), key)
+	cachedItem, err = get(k.failoverConnPool.Get(), key)
 	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
 		return
 	}
@@ -113,17 +112,108 @@ func (k *KeeperWithFailover) GetFailover(key string) (cachedItem any, err error)
 }
 
 // StoreFailover :nodoc:
-func (k *KeeperWithFailover) StoreFailover(mutex *redsync.Mutex, c Item) error {
+func (k *KeeperWithFailover) StoreFailover(c Item) error {
 	if k.disableCaching {
 		return nil
 	}
-	defer SafeUnlock(mutex)
+
+	client := k.failoverConnPool.Get()
+	defer func() {
+		_ = client.Close()
+	}()
+	_, err := client.Do("SETEX", c.GetKey(), k.failoverTTL.Seconds(), c.GetValue())
+	return err
+}
+
+// GetHashMemberOrSet :nodoc:
+func (k *KeeperWithFailover) GetHashMemberOrSet(identifier, key string, fn GetterFn, opts ...func(Item)) (res []byte, err error) {
+	cachedValue, mu, err := k.GetHashMemberOrLock(identifier, key)
+	if err != nil {
+		return
+	}
+	if cachedValue != nil {
+		res, ok := cachedValue.([]byte)
+		if !ok {
+			return nil, errors.New("invalid cache value")
+		}
+
+		return res, nil
+	}
+
+	// handle if nil value is cached
+	if mu == nil {
+		return
+	}
+	defer SafeUnlock(mu)
+
+	item, err := fn()
+	if err != nil {
+		cachedValue, err = k.GetHashMemberFailover(identifier, key)
+		if err != nil {
+			return nil, err
+		}
+
+		return cachedValue.([]byte), nil
+	}
+
+	if item == nil {
+		_ = k.StoreHashNilMember(identifier, key)
+		return
+	}
+
+	cachedValue, err = tapao.Marshal(item, tapao.With(k.serializer))
+	if err != nil {
+		return
+	}
+
+	cacheItem := NewItem(key, cachedValue)
+	for _, o := range opts {
+		o(cacheItem)
+	}
+	_ = k.StoreHashMember(identifier, cacheItem)
+	_ = k.StoreHashMemberFailover(identifier, cacheItem)
+
+	return cachedValue.([]byte), nil
+}
+
+// GetHashMemberFailover :nodoc:
+func (k *KeeperWithFailover) GetHashMemberFailover(identifier, key string) (cachedItem any, err error) {
+	if k.disableCaching {
+		return
+	}
+
+	cachedItem, err = getHashMember(k.failoverConnPool.Get(), identifier, key)
+	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
+		return
+	}
+
+	return nil, nil
+}
+
+// StoreHashMemberFailover :nodoc:
+func (k *KeeperWithFailover) StoreHashMemberFailover(identifier string, c Item) (err error) {
+	if k.disableCaching {
+		return nil
+	}
 
 	client := k.failoverConnPool.Get()
 	defer func() {
 		_ = client.Close()
 	}()
 
-	_, err := client.Do("SETEX", c.GetKey(), k.decideCacheTTL(c), c.GetValue())
-	return err
+	err = client.Send("MULTI")
+	if err != nil {
+		return err
+	}
+	_, err = client.Do("HSET", identifier, c.GetKey(), c.GetValue())
+	if err != nil {
+		return err
+	}
+	_, err = client.Do("EXPIRE", identifier, k.failoverTTL.Seconds())
+	if err != nil {
+		return err
+	}
+
+	_, err = client.Do("EXEC")
+	return
 }
