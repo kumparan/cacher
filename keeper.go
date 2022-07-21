@@ -1,10 +1,12 @@
 package cacher
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/kumparan/redsync/v4"
+	"github.com/kumparan/tapao"
 
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
@@ -18,9 +20,13 @@ const (
 	defaultLockDuration = 1 * time.Minute
 	defaultLockTries    = 1
 	defaultWaitTime     = 15 * time.Second
+	defaultSerializer   = tapao.JSON
 )
 
-var nilJSON = []byte("null")
+var nilValue = map[tapao.SerializerType][]byte{
+	tapao.JSON:        []byte("null"),
+	tapao.MessagePack: []byte("192"),
+}
 
 type (
 	// GetterFn :nodoc:
@@ -30,7 +36,7 @@ type (
 	Keeper interface {
 		Get(key string) (any, error)
 		GetOrLock(key string) (any, *redsync.Mutex, error)
-		GetOrSet(key string, mtd GetterFn, ttl time.Duration) (any, error)
+		GetOrSet(key string, fn GetterFn, opts ...func(Item)) ([]byte, error)
 		Store(*redsync.Mutex, Item) error
 		StoreWithoutBlocking(Item) error
 		StoreMultiWithoutBlocking([]Item) error
@@ -51,6 +57,7 @@ type (
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
 		SetDisableCaching(bool)
+		SetSerializer(t tapao.SerializerType)
 
 		CheckKeyExist(string) (bool, error)
 
@@ -66,6 +73,7 @@ type (
 
 		// HASH BUCKET
 		GetHashMemberOrLock(identifier string, key string) (any, *redsync.Mutex, error)
+		GetHashMemberOrSet(identifier, key string, fn GetterFn, opts ...func(Item)) ([]byte, error)
 		StoreHashMember(string, Item) error
 		StoreHashNilMember(identifier, cacheKey string) error
 		GetHashMember(identifier string, key string) (any, error)
@@ -85,6 +93,8 @@ type (
 		lockConnPool *redigo.Pool
 		lockDuration time.Duration
 		lockTries    int
+
+		serializer tapao.SerializerType
 	}
 )
 
@@ -97,6 +107,7 @@ func NewKeeper() Keeper {
 		lockTries:      defaultLockTries,
 		waitTime:       defaultWaitTime,
 		disableCaching: false,
+		serializer:     defaultSerializer,
 	}
 }
 
@@ -139,13 +150,18 @@ func (k *keeper) SetDisableCaching(b bool) {
 	k.disableCaching = b
 }
 
+// SetSerializer :nodoc:
+func (k *keeper) SetSerializer(t tapao.SerializerType) {
+	k.serializer = t
+}
+
 // Get :nodoc:
 func (k *keeper) Get(key string) (cachedItem any, err error) {
 	if k.disableCaching {
 		return
 	}
 
-	cachedItem, err = getCachedItem(k.connPool.Get(), key)
+	cachedItem, err = get(k.connPool.Get(), key)
 	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
 		return
 	}
@@ -159,7 +175,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 		return
 	}
 
-	cachedItem, err = getCachedItem(k.connPool.Get(), key)
+	cachedItem, err = get(k.connPool.Get(), key)
 	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
 		return
 	}
@@ -178,7 +194,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 		}
 
 		if !k.isLocked(key) {
-			cachedItem, err = getCachedItem(k.connPool.Get(), key)
+			cachedItem, err = get(k.connPool.Get(), key)
 			if err != nil {
 				if err == ErrKeyNotExist {
 					mutex, err = k.AcquireLock(key)
@@ -206,13 +222,18 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 }
 
 // GetOrSet :nodoc:
-func (k *keeper) GetOrSet(key string, fn GetterFn, ttl time.Duration) (cachedItem any, err error) {
-	cachedItem, mu, err := k.GetOrLock(key)
+func (k *keeper) GetOrSet(key string, fn GetterFn, opts ...func(Item)) (res []byte, err error) {
+	cachedValue, mu, err := k.GetOrLock(key)
 	if err != nil {
 		return
 	}
-	if cachedItem != nil {
-		return
+	if cachedValue != nil {
+		res, ok := cachedValue.([]byte)
+		if !ok {
+			return nil, errors.New("invalid cache value")
+		}
+
+		return res, nil
 	}
 
 	// handle if nil value is cached
@@ -221,18 +242,27 @@ func (k *keeper) GetOrSet(key string, fn GetterFn, ttl time.Duration) (cachedIte
 	}
 
 	defer SafeUnlock(mu)
-	cachedItem, err = fn()
+	item, err := fn()
 	if err != nil {
 		return
 	}
 
-	if cachedItem == nil {
+	if item == nil {
 		_ = k.StoreNil(key)
 		return
 	}
 
-	_ = k.Store(mu, NewItemWithCustomTTL(key, cachedItem, ttl))
-	return
+	cachedValue, err = tapao.Marshal(item, tapao.With(k.serializer))
+	if err != nil {
+		return
+	}
+
+	cacheItem := NewItem(key, cachedValue)
+	for _, o := range opts {
+		o(cacheItem)
+	}
+	_ = k.Store(mu, cacheItem)
+	return cachedValue.([]byte), nil
 }
 
 // Store :nodoc:
@@ -268,14 +298,14 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 
 // StoreNil :nodoc:
 func (k *keeper) StoreNil(cacheKey string) error {
-	item := NewItemWithCustomTTL(cacheKey, nilJSON, k.nilTTL)
+	item := NewItemWithCustomTTL(cacheKey, nilValue[k.serializer], k.nilTTL)
 	err := k.StoreWithoutBlocking(item)
 	return err
 }
 
 // StoreHashNilMember :nodoc:
 func (k *keeper) StoreHashNilMember(identifier, cacheKey string) error {
-	item := NewItemWithCustomTTL(cacheKey, nilJSON, k.nilTTL)
+	item := NewItemWithCustomTTL(cacheKey, nilValue[k.serializer], k.nilTTL)
 	err := k.StoreHashMember(identifier, item)
 	return err
 }
@@ -679,6 +709,50 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 	return nil, nil, ErrWaitTooLong
 }
 
+// GetHashMemberOrSet :nodoc:
+func (k *keeper) GetHashMemberOrSet(identifier, key string, fn GetterFn, opts ...func(Item)) (res []byte, err error) {
+	cachedValue, mu, err := k.GetHashMemberOrLock(identifier, key)
+	if err != nil {
+		return
+	}
+	if cachedValue != nil {
+		res, ok := cachedValue.([]byte)
+		if !ok {
+			return nil, errors.New("invalid cache value")
+		}
+
+		return res, nil
+	}
+
+	// handle if nil value is cached
+	if mu == nil {
+		return
+	}
+
+	defer SafeUnlock(mu)
+	item, err := fn()
+	if err != nil {
+		return
+	}
+
+	if item == nil {
+		_ = k.StoreHashNilMember(identifier, key)
+		return
+	}
+
+	cachedValue, err = tapao.Marshal(item, tapao.With(k.serializer))
+	if err != nil {
+		return
+	}
+
+	cacheItem := NewItem(key, cachedValue)
+	for _, o := range opts {
+		o(cacheItem)
+	}
+	_ = k.StoreHashMember(identifier, cacheItem)
+	return cachedValue.([]byte), nil
+}
+
 // GetHashMember :nodoc:
 func (k *keeper) GetHashMember(identifier string, key string) (value any, err error) {
 	if k.disableCaching {
@@ -690,29 +764,7 @@ func (k *keeper) GetHashMember(identifier string, key string) (value any, err er
 		_ = client.Close()
 	}()
 
-	err = client.Send("MULTI")
-	if err != nil {
-		return nil, err
-	}
-	err = client.Send("HEXISTS", identifier, key)
-	if err != nil {
-		return nil, err
-	}
-	err = client.Send("HGET", identifier, key)
-	if err != nil {
-		return nil, err
-	}
-	res, err := redigo.Values(client.Do("EXEC"))
-	if err != nil {
-		return nil, err
-	}
-
-	val, ok := res[0].(int64)
-	if !ok || val <= 0 {
-		return nil, ErrKeyNotExist
-	}
-
-	return res[1], nil
+	return getHashMember(client, identifier, key)
 }
 
 // DeleteHashMember :nodoc:

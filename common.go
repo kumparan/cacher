@@ -45,7 +45,7 @@ func getOffset(page, limit int64) int64 {
 	return offset
 }
 
-func getCachedItem(client redigo.Conn, key string) (value any, err error) {
+func get(client redigo.Conn, key string) (value any, err error) {
 	defer func() {
 		_ = client.Close()
 	}()
@@ -59,6 +59,36 @@ func getCachedItem(client redigo.Conn, key string) (value any, err error) {
 		return nil, err
 	}
 	err = client.Send("GET", key)
+	if err != nil {
+		return nil, err
+	}
+	res, err := redigo.Values(client.Do("EXEC"))
+	if err != nil {
+		return nil, err
+	}
+
+	val, ok := res[0].(int64)
+	if !ok || val <= 0 {
+		return nil, ErrKeyNotExist
+	}
+
+	return res[1], nil
+}
+
+func getHashMember(client redigo.Conn, identifier, key string) (value any, err error) {
+	defer func() {
+		_ = client.Close()
+	}()
+
+	err = client.Send("MULTI")
+	if err != nil {
+		return nil, err
+	}
+	err = client.Send("HEXISTS", identifier, key)
+	if err != nil {
+		return nil, err
+	}
+	err = client.Send("HGET", identifier, key)
 	if err != nil {
 		return nil, err
 	}
