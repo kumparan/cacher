@@ -1,15 +1,14 @@
 package cacher
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/kumparan/redsync/v4"
-	"github.com/kumparan/tapao"
-
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
+	"github.com/kumparan/redsync/v4"
 	redigosync "github.com/kumparan/redsync/v4/redis/redigo"
 )
 
@@ -20,13 +19,9 @@ const (
 	defaultLockDuration = 1 * time.Minute
 	defaultLockTries    = 1
 	defaultWaitTime     = 15 * time.Second
-	defaultSerializer   = tapao.JSON
 )
 
-var nilValue = map[tapao.SerializerType][]byte{
-	tapao.JSON:        []byte("null"),
-	tapao.MessagePack: []byte("192"),
-}
+var nilValue = []byte("null")
 
 type (
 	// GetterFn :nodoc:
@@ -57,7 +52,6 @@ type (
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
 		SetDisableCaching(bool)
-		SetSerializer(t tapao.SerializerType)
 
 		CheckKeyExist(string) (bool, error)
 
@@ -93,8 +87,6 @@ type (
 		lockConnPool *redigo.Pool
 		lockDuration time.Duration
 		lockTries    int
-
-		serializer tapao.SerializerType
 	}
 )
 
@@ -107,7 +99,6 @@ func NewKeeper() Keeper {
 		lockTries:      defaultLockTries,
 		waitTime:       defaultWaitTime,
 		disableCaching: false,
-		serializer:     defaultSerializer,
 	}
 }
 
@@ -148,11 +139,6 @@ func (k *keeper) SetWaitTime(d time.Duration) {
 // SetDisableCaching :nodoc:
 func (k *keeper) SetDisableCaching(b bool) {
 	k.disableCaching = b
-}
-
-// SetSerializer :nodoc:
-func (k *keeper) SetSerializer(t tapao.SerializerType) {
-	k.serializer = t
 }
 
 // Get :nodoc:
@@ -252,7 +238,7 @@ func (k *keeper) GetOrSet(key string, fn GetterFn, opts ...func(Item)) (res []by
 		return
 	}
 
-	cachedValue, err = tapao.Marshal(item, tapao.With(k.serializer))
+	cachedValue, err = json.Marshal(item)
 	if err != nil {
 		return
 	}
@@ -298,14 +284,14 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 
 // StoreNil :nodoc:
 func (k *keeper) StoreNil(cacheKey string) error {
-	item := NewItemWithCustomTTL(cacheKey, nilValue[k.serializer], k.nilTTL)
+	item := NewItemWithCustomTTL(cacheKey, nilValue, k.nilTTL)
 	err := k.StoreWithoutBlocking(item)
 	return err
 }
 
 // StoreHashNilMember :nodoc:
 func (k *keeper) StoreHashNilMember(identifier, cacheKey string) error {
-	item := NewItemWithCustomTTL(cacheKey, nilValue[k.serializer], k.nilTTL)
+	item := NewItemWithCustomTTL(cacheKey, nilValue, k.nilTTL)
 	err := k.StoreHashMember(identifier, item)
 	return err
 }
@@ -740,7 +726,7 @@ func (k *keeper) GetHashMemberOrSet(identifier, key string, fn GetterFn, opts ..
 		return
 	}
 
-	cachedValue, err = tapao.Marshal(item, tapao.With(k.serializer))
+	cachedValue, err = json.Marshal(item)
 	if err != nil {
 		return
 	}

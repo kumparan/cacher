@@ -1,11 +1,10 @@
 package cacher
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/kumparan/tapao"
 
 	"github.com/stretchr/testify/require"
 
@@ -39,7 +38,7 @@ func Test_keeperWithFailover_GetOrSet(t *testing.T) {
 		TestNilTime:    nil,
 	}
 
-	valByte, err := tapao.Marshal(val, tapao.With(tapao.JSON))
+	valByte, err := json.Marshal(val)
 	require.NoError(t, err)
 
 	t.Run("No cache", func(t *testing.T) {
@@ -50,7 +49,7 @@ func Test_keeperWithFailover_GetOrSet(t *testing.T) {
 		require.NoError(t, err)
 
 		var myVar TestStruct
-		err = tapao.Unmarshal(retVal, &myVar, tapao.With(tapao.JSON))
+		err = json.Unmarshal(retVal, &myVar)
 		require.NoError(t, err)
 
 		assert.EqualValues(t, val, myVar)
@@ -75,10 +74,27 @@ func Test_keeperWithFailover_GetOrSet(t *testing.T) {
 		require.NoError(t, err)
 
 		var myVar TestStruct
-		err = tapao.Unmarshal(retVal, &myVar, tapao.With(tapao.JSON))
+		err = json.Unmarshal(retVal, &myVar)
 		require.NoError(t, err)
 
 		assert.EqualValues(t, val, myVar)
+	})
+
+	t.Run("Already cached, nil value", func(t *testing.T) {
+		testKey := "just-a-key-nil"
+		err := m.Set(testKey, string(nilValue))
+		require.NoError(t, err)
+
+		retVal, err := k.GetOrSet(testKey, func() (any, error) {
+			return "thisis-not-expected", nil
+		})
+		require.NoError(t, err)
+
+		var myVar *TestStruct
+		err = json.Unmarshal(retVal, &myVar)
+		require.NoError(t, err)
+
+		assert.Nil(t, myVar)
 	})
 
 	t.Run("use failover", func(t *testing.T) {
@@ -92,9 +108,25 @@ func Test_keeperWithFailover_GetOrSet(t *testing.T) {
 		require.NoError(t, err)
 
 		var myVar TestStruct
-		err = tapao.Unmarshal(retVal, &myVar, tapao.With(tapao.JSON))
+		err = json.Unmarshal(retVal, &myVar)
 		require.NoError(t, err)
 		assert.EqualValues(t, val, myVar)
+	})
+
+	t.Run("use failover, nil value", func(t *testing.T) {
+		testKey := "just-a-key-failover-2"
+		err = mFO.Set(testKey, string(nilValue))
+		require.NoError(t, err)
+
+		retVal, err := k.GetOrSet(testKey, func() (i any, e error) {
+			return nil, errors.New("error")
+		})
+		require.NoError(t, err)
+
+		var myVar *TestStruct
+		err = json.Unmarshal(retVal, &myVar)
+		require.NoError(t, err)
+		assert.Nil(t, myVar)
 	})
 }
 
@@ -124,7 +156,7 @@ func Test_keeperWithFailover_GetHashMemberOrSet(t *testing.T) {
 		TestNilTime:    nil,
 	}
 
-	valByte, err := tapao.Marshal(val, tapao.With(tapao.JSON))
+	valByte, err := json.Marshal(val)
 	require.NoError(t, err)
 
 	identifier := "this-is-identifier"
@@ -139,7 +171,7 @@ func Test_keeperWithFailover_GetHashMemberOrSet(t *testing.T) {
 		require.NoError(t, err)
 
 		var myVar TestStruct
-		err = tapao.Unmarshal(retVal, &myVar, tapao.With(tapao.JSON))
+		err = json.Unmarshal(retVal, &myVar)
 		require.NoError(t, err)
 
 		assert.EqualValues(t, val, myVar)
@@ -163,10 +195,26 @@ func Test_keeperWithFailover_GetHashMemberOrSet(t *testing.T) {
 		require.NoError(t, err)
 
 		var myVar TestStruct
-		err = tapao.Unmarshal(retVal, &myVar, tapao.With(tapao.JSON))
+		err = json.Unmarshal(retVal, &myVar)
 		require.NoError(t, err)
 
 		assert.EqualValues(t, val, myVar)
+	})
+
+	t.Run("Already cached, nil value", func(t *testing.T) {
+		testKey := "just-a-key-nil"
+		m.HSet(identifier, testKey, string(nilValue))
+
+		retVal, err := k.GetHashMemberOrSet(identifier, testKey, func() (any, error) {
+			return "thisis-not-expected", nil
+		})
+		require.NoError(t, err)
+
+		var myVar *TestStruct
+		err = json.Unmarshal(retVal, &myVar)
+		require.NoError(t, err)
+
+		assert.Nil(t, myVar)
 	})
 
 	t.Run("use failover", func(t *testing.T) {
@@ -179,8 +227,24 @@ func Test_keeperWithFailover_GetHashMemberOrSet(t *testing.T) {
 		require.NoError(t, err)
 
 		var myVar TestStruct
-		err = tapao.Unmarshal(retVal, &myVar, tapao.With(tapao.JSON))
+		err = json.Unmarshal(retVal, &myVar)
 		require.NoError(t, err)
 		assert.EqualValues(t, val, myVar)
 	})
+
+	t.Run("use failover, nil value", func(t *testing.T) {
+		testKey := "just-a-key-failover-2"
+		mFO.HSet(identifier, testKey, string(nilValue))
+
+		retVal, err := k.GetHashMemberOrSet(identifier, testKey, func() (i any, e error) {
+			return nil, errors.New("error")
+		})
+		require.NoError(t, err)
+
+		var myVar *TestStruct
+		err = json.Unmarshal(retVal, &myVar)
+		require.NoError(t, err)
+		assert.Nil(t, myVar)
+	})
+
 }

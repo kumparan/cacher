@@ -1,10 +1,9 @@
 package cacher
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
-
-	"github.com/kumparan/tapao"
 
 	redigo "github.com/gomodule/redigo/redis"
 )
@@ -30,7 +29,6 @@ func NewKeeperWithFailover() *KeeperWithFailover {
 			lockTries:      defaultLockTries,
 			waitTime:       defaultWaitTime,
 			disableCaching: false,
-			serializer:     defaultSerializer,
 		},
 		failoverTTL: defaultFailoverTTL,
 	}
@@ -82,7 +80,7 @@ func (k *KeeperWithFailover) GetOrSet(key string, fn GetterFn, opts ...func(Item
 		return
 	}
 
-	cachedValue, err = tapao.Marshal(item, tapao.With(k.serializer))
+	cachedValue, err = json.Marshal(item)
 	if err != nil {
 		return
 	}
@@ -161,7 +159,7 @@ func (k *KeeperWithFailover) GetHashMemberOrSet(identifier, key string, fn Gette
 		return
 	}
 
-	cachedValue, err = tapao.Marshal(item, tapao.With(k.serializer))
+	cachedValue, err = json.Marshal(item)
 	if err != nil {
 		return
 	}
