@@ -3,6 +3,7 @@ package cacher
 import (
 	"encoding/json"
 	"errors"
+	"github.com/hashicorp/go-multierror"
 	"time"
 
 	redigo "github.com/gomodule/redigo/redis"
@@ -214,4 +215,40 @@ func (k *KeeperWithFailover) StoreHashMemberFailover(identifier string, c Item) 
 
 	_, err = client.Do("EXEC")
 	return
+}
+
+func (k *KeeperWithFailover) StoreNil(cacheKey string) error {
+	item := NewItemWithCustomTTL(cacheKey, nilValue, k.nilTTL)
+	//var errs error
+	var errs *multierror.Error
+	errs = multierror.Append(errs, k.StoreWithoutBlocking(item), k.StoreFailover(item))
+	return errs.ErrorOrNil()
+}
+
+func (k *KeeperWithFailover) DeleteByKeys(keys []string) error {
+	if k.disableCaching {
+		return nil
+	}
+
+	client := k.connPool.Get()
+	defer func() {
+		_ = client.Close()
+	}()
+	failoverClient := k.failoverConnPool.Get()
+	var redisKeys []any
+	for _, key := range keys {
+		redisKeys = append(redisKeys, key)
+	}
+
+	var errs *multierror.Error
+	_, err := client.Do("DEL", redisKeys...)
+	if err != nil {
+		errs = multierror.Append(errs, err)
+	}
+	_, err = failoverClient.Do("DEL", redisKeys...)
+	if err != nil {
+		errs = multierror.Append(errs, err)
+	}
+
+	return errs.ErrorOrNil()
 }

@@ -248,3 +248,79 @@ func Test_keeperWithFailover_GetHashMemberOrSet(t *testing.T) {
 	})
 
 }
+
+func Test_keeperWithFailover_StoreNil(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeperWithFailover()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	mFO, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	rFO := newRedisConn(mFO.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+	k.SetFailoverConnectionPool(rFO)
+
+	key := "cache-key"
+
+	assert.False(t, m.Exists(key) || mFO.Exists(key))
+	err = k.StoreNil(key)
+	assert.NoError(t, err)
+	assert.True(t, m.Exists(key) && mFO.Exists(key))
+	res, err := k.Get(key)
+	assert.NoError(t, err)
+	assert.Equal(t, nilValue, res)
+	res, err = k.GetFailover(key)
+	assert.NoError(t, err)
+	assert.Equal(t, nilValue, res)
+}
+
+func Test_keeperWithFailover_DeleteBykeys(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeperWithFailover()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	mFO, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	rFO := newRedisConn(mFO.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+	k.SetFailoverConnectionPool(rFO)
+
+	testCases := map[string]any{
+		"1": "a",
+		"2": "b",
+		"3": "c",
+		"4": "d",
+		"5": "e",
+		"6": "f",
+	}
+
+	for key, val := range testCases {
+		i := NewItem(key, val)
+		err := k.StoreFailover(i)
+		assert.NoError(t, err)
+		err = k.StoreWithoutBlocking(i)
+		assert.NoError(t, err)
+		assert.True(t, m.Exists(key) && mFO.Exists(key))
+	}
+
+	var keys []string
+	for key := range testCases {
+		keys = append(keys, key)
+	}
+	err = k.DeleteByKeys(keys)
+	assert.NoError(t, err)
+
+	for _, key := range keys {
+		assert.False(t, m.Exists(key) || mFO.Exists(key))
+	}
+}
