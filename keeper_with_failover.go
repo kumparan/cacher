@@ -230,10 +230,11 @@ func (k *KeeperWithFailover) DeleteByKeys(keys []string) error {
 	}
 
 	client := k.connPool.Get()
+	failoverClient := k.failoverConnPool.Get()
 	defer func() {
 		_ = client.Close()
+		_ = failoverClient.Close()
 	}()
-	failoverClient := k.failoverConnPool.Get()
 	var redisKeys []any
 	for _, key := range keys {
 		redisKeys = append(redisKeys, key)
