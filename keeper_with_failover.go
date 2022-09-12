@@ -219,7 +219,6 @@ func (k *KeeperWithFailover) StoreHashMemberFailover(identifier string, c Item) 
 
 func (k *KeeperWithFailover) StoreNil(cacheKey string) error {
 	item := NewItemWithCustomTTL(cacheKey, nilValue, k.nilTTL)
-	//var errs error
 	var errs *multierror.Error
 	errs = multierror.Append(errs, k.StoreWithoutBlocking(item), k.StoreFailover(item))
 	return errs.ErrorOrNil()
