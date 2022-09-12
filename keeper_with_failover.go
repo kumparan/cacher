@@ -242,13 +242,31 @@ func (k *KeeperWithFailover) DeleteByKeys(keys []string) error {
 
 	var errs *multierror.Error
 	_, err := client.Do("DEL", redisKeys...)
-	if err != nil {
-		errs = multierror.Append(errs, err)
-	}
+	errs = multierror.Append(errs, err)
 	_, err = failoverClient.Do("DEL", redisKeys...)
-	if err != nil {
-		errs = multierror.Append(errs, err)
+	errs = multierror.Append(errs, err)
+
+	return errs.ErrorOrNil()
+}
+
+// DeleteHashMember :nodoc:
+func (k *KeeperWithFailover) DeleteHashMember(identifier string, key string) (error) {
+	if k.disableCaching {
+		return nil
 	}
+
+	client := k.connPool.Get()
+	failoverClient := k.failoverConnPool.Get()
+	defer func() {
+		_ = client.Close()
+		_ = failoverClient.Close()
+	}()
+
+	var errs *multierror.Error
+	_, err := client.Do("HDEL", identifier, key)
+	errs = multierror.Append(errs, err)
+	_, err = failoverClient.Do("HDEL", identifier, key)
+	errs = multierror.Append(errs, err)
 
 	return errs.ErrorOrNil()
 }

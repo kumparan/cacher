@@ -324,3 +324,34 @@ func Test_keeperWithFailover_DeleteBykeys(t *testing.T) {
 		assert.False(t, m.Exists(key) || mFO.Exists(key))
 	}
 }
+
+func Test_keeperWithFailover_DeleteHashMember(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeperWithFailover()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	mFO, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	rFO := newRedisConn(mFO.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+	k.SetFailoverConnectionPool(rFO)
+
+	var (
+		identifier = "identifier"
+		cacheItem  = NewItem("key", "value")
+	)
+
+	err = k.StoreHashMember(identifier, cacheItem)
+	assert.NoError(t, err)
+	err = k.StoreHashMemberFailover(identifier, cacheItem)
+	assert.NoError(t, err)
+	assert.True(t, m.Exists(identifier) && mFO.Exists(identifier))
+	err = k.DeleteHashMember(identifier, "key")
+	assert.NoError(t, err)
+	assert.False(t, m.Exists(identifier) || m.Exists(identifier))
+}
