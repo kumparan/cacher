@@ -393,55 +393,73 @@ func TestIncreaseCachedValueByOne(t *testing.T) {
 }
 
 func TestDeleteByKeys(t *testing.T) {
-	// Initialize new cache keeper
-	k := NewKeeper()
+	t.Run("success", func(t *testing.T) {
+		// Initialize new cache keeper
+		k := NewKeeper()
 
-	m, err := miniredis.Run()
-	assert.NoError(t, err)
-
-	r := newRedisConn(m.Addr())
-	k.SetConnectionPool(r)
-	k.SetLockConnectionPool(r)
-
-	// It should purge keys match with the matchstring while leaving the rest untouched
-	testKeys := map[string]any{
-		"story:1234:comment:4321": "anything",
-		"story:1234:comment:4231": "anything",
-		"story:1234:comment:4121": "anything",
-		"story:1234:comment:4421": "anything",
-		"story:1234:comment:4521": "anything",
-		"story:1234:comment:4021": "anything",
-		"story:2000:comment:3021": "anything",
-		"story:2000:comment:3421": "anything",
-		"story:2000:comment:3231": "anything",
-	}
-
-	for key := range testKeys {
-		_, mu, err := k.GetOrLock(key)
+		m, err := miniredis.Run()
 		assert.NoError(t, err)
 
-		err = k.Store(mu, NewItem(key, "anything"))
-		assert.NoError(t, err)
-	}
-	keys := []string{
-		"story:1234:comment:4321",
-		"story:1234:comment:4231",
-		"story:1234:comment:4121",
-		"story:1234:comment:4421",
-		"story:1234:comment:4521",
-		"story:1234:comment:4021",
-		"story:2000:comment:3021",
-		"story:2000:comment:3421",
-		"story:2000:comment:3231",
-	}
-	err = k.DeleteByKeys(keys)
-	assert.NoError(t, err)
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
 
-	for _, key := range keys {
-		res, _, err := k.GetOrLock(key)
+		// It should purge keys match with the matchstring while leaving the rest untouched
+		testKeys := map[string]any{
+			"story:1234:comment:4321": "anything",
+			"story:1234:comment:4231": "anything",
+			"story:1234:comment:4121": "anything",
+			"story:1234:comment:4421": "anything",
+			"story:1234:comment:4521": "anything",
+			"story:1234:comment:4021": "anything",
+			"story:2000:comment:3021": "anything",
+			"story:2000:comment:3421": "anything",
+			"story:2000:comment:3231": "anything",
+		}
+
+		for key := range testKeys {
+			_, mu, err := k.GetOrLock(key)
+			assert.NoError(t, err)
+
+			err = k.Store(mu, NewItem(key, "anything"))
+			assert.NoError(t, err)
+		}
+		keys := []string{
+			"story:1234:comment:4321",
+			"story:1234:comment:4231",
+			"story:1234:comment:4121",
+			"story:1234:comment:4421",
+			"story:1234:comment:4521",
+			"story:1234:comment:4021",
+			"story:2000:comment:3021",
+			"story:2000:comment:3421",
+			"story:2000:comment:3231",
+		}
+		err = k.DeleteByKeys(keys)
 		assert.NoError(t, err)
-		assert.EqualValues(t, nil, res)
-	}
+
+		for _, key := range keys {
+			res, _, err := k.GetOrLock(key)
+			assert.NoError(t, err)
+			assert.EqualValues(t, nil, res)
+		}
+	})
+
+	t.Run("keys <= 0", func(t *testing.T) {
+		// Initialize new cache keeper
+		k := NewKeeper()
+
+		m, err := miniredis.Run()
+		assert.NoError(t, err)
+
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+
+		var keys []string
+		err = k.DeleteByKeys(keys)
+		assert.NoError(t, err)
+	})
 }
 
 func TestStoreMultiWithoutBlocking(t *testing.T) {

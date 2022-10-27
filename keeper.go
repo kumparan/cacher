@@ -373,6 +373,10 @@ func (k *keeper) DeleteByKeys(keys []string) error {
 		return nil
 	}
 
+	if len(keys) <= 0 {
+		return nil
+	}
+
 	client := k.connPool.Get()
 	defer func() {
 		_ = client.Close()
