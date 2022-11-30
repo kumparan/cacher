@@ -32,6 +32,7 @@ type (
 		Get(key string) (any, error)
 		GetOrLock(key string) (any, *redsync.Mutex, error)
 		GetOrSet(key string, fn GetterFn, opts ...func(Item)) ([]byte, error)
+		GetMultiple(keys []string) ([]any, error)
 		Store(*redsync.Mutex, Item) error
 		StoreWithoutBlocking(Item) error
 		StoreMultiWithoutBlocking([]Item) error
@@ -153,6 +154,27 @@ func (k *keeper) Get(key string) (cachedItem any, err error) {
 	}
 
 	return nil, nil
+}
+
+// GetMultiple :nodoc:
+func (k *keeper) GetMultiple(keys []string) (cachedItems []any, err error) {
+	if k.disableCaching {
+		return
+	}
+	c := k.connPool.Get()
+	c.Send("MULTI")
+	for _, key := range keys {
+		err = c.Send("GET", key)
+		if err != nil {
+			return
+		}
+	}
+	r, err := c.Do("EXEC")
+	if err != nil {
+		return nil, err
+	}
+
+	return redigo.Values(r, err)
 }
 
 // GetOrLock :nodoc:

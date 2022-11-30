@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/alicebob/miniredis/v2"
 )
@@ -1165,4 +1164,40 @@ func TestHashScan_Empty(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Empty(t, result)
 	assert.EqualValues(t, 0, cursor)
+}
+
+func TestGetMultiple(t *testing.T) {
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+	k.SetWaitTime(1 * time.Second) // override wait time to 1 second
+
+	keys := []string{"a", "b", "c"}
+	items := map[string]string{"a": "A", "b": "B", "c": "C"}
+	for key, val := range items {
+		k.StoreWithoutBlocking(NewItem(key, val))
+	}
+
+	t.Run("success", func(t *testing.T) {
+		res, err := k.GetMultiple(keys)
+		assert.NoError(t, err)
+		for i, key := range keys {
+			assert.EqualValues(t, items[key], res[i])
+		}
+	})
+
+	t.Run("success with missing cache", func(t *testing.T) {
+		keys2 := append(keys, "d")
+		res, err := k.GetMultiple(keys2)
+		assert.NoError(t, err)
+		for i, key := range keys {
+			assert.EqualValues(t, items[key], res[i])
+		}
+		assert.EqualValues(t, res[len(res)-1], nil)
+	})
 }
