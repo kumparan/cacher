@@ -103,12 +103,28 @@ func (k *KeeperWithFailover) GetFailover(key string) (cachedItem any, err error)
 		return
 	}
 
-	cachedItem, err = get(k.failoverConnPool.Get(), key)
-	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
+	counterKey := generateCounterKey(key)
+	cachedItem, counter, err := get(k.failoverConnPool.Get(), key, counterKey)
+	switch err {
+	case nil, ErrKeyNotExist, redigo.ErrNil:
+	default:
 		return
 	}
 
-	return nil, nil
+	if cachedItem == nil {
+		return nil, nil
+	}
+
+	if k.disableDynamicTTL {
+		return
+	}
+
+	err = k.incrementTTL(key, counterKey, counter)
+	if err != nil {
+		return nil, err
+	}
+
+	return
 }
 
 // StoreFailover :nodoc:
@@ -121,7 +137,23 @@ func (k *KeeperWithFailover) StoreFailover(c Item) error {
 	defer func() {
 		_ = client.Close()
 	}()
-	_, err := client.Do("SETEX", c.GetKey(), k.failoverTTL.Seconds(), c.GetValue())
+
+	err := client.Send("MULTI")
+	if err != nil {
+		return err
+	}
+	err = client.Send("SETEX", c.GetKey(), k.failoverTTL.Seconds(), c.GetValue())
+	if err != nil {
+		return err
+	}
+	if !k.disableDynamicTTL {
+		err = client.Send("SET", generateCounterKey(c.GetKey()), 0)
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err = redigo.Values(client.Do("EXEC"))
 	return err
 }
 
@@ -240,7 +272,7 @@ func (k *KeeperWithFailover) DeleteByKeys(keys []string) error {
 	}()
 	var redisKeys []any
 	for _, key := range keys {
-		redisKeys = append(redisKeys, key)
+		redisKeys = append(redisKeys, key, generateCounterKey(key))
 	}
 
 	var errs *multierror.Error

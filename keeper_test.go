@@ -80,6 +80,7 @@ func TestGet(t *testing.T) {
 
 	m, err := miniredis.Run()
 	assert.NoError(t, err)
+	defer m.Close()
 
 	r := newRedisConn(m.Addr())
 	k.SetConnectionPool(r)
@@ -88,19 +89,79 @@ func TestGet(t *testing.T) {
 
 	testKey := "test-key"
 
-	t.Run("Not Exist", func(t *testing.T) {
-		assert.False(t, m.Exists(testKey))
+	t.Run("Disable Caching", func(t *testing.T) {
+		k.SetDisableCaching(true)
+		defer k.SetDisableCaching(false)
 		result, err := k.Get(testKey)
 		assert.NoError(t, err)
 		assert.Nil(t, result)
 	})
 
+	t.Run("Not Exist", func(t *testing.T) {
+		assert.False(t, m.Exists(testKey))
+		result, err := k.Get(testKey)
+		assert.NoError(t, err)
+		assert.Nil(t, result)
+
+		assert.False(t, m.Exists(generateCounterKey(testKey)))
+	})
+
 	t.Run("Exist", func(t *testing.T) {
 		val := "something-something-here"
 		_ = m.Set(testKey, val)
+
+		assert.True(t, m.Exists(testKey))
 		result, err := k.Get(testKey)
 		assert.NoError(t, err)
 		assert.EqualValues(t, result, val)
+
+		assert.True(t, m.Exists(generateCounterKey(testKey)))
+		counter, err := m.Get(generateCounterKey(testKey))
+		assert.NoError(t, err)
+		assert.Equal(t, "1", counter)
+	})
+
+	t.Run("Disable Dynamic TTL", func(t *testing.T) {
+		k.SetDisableDynamicTTL(true)
+		defer k.SetDisableDynamicTTL(false)
+
+		testKey := "test-key-disable-ttl"
+
+		val := "something-something-here"
+		_ = m.Set(testKey, val)
+
+		assert.False(t, m.Exists(generateCounterKey(testKey)))
+
+		assert.True(t, m.Exists(testKey))
+		result, err := k.Get(testKey)
+		assert.NoError(t, err)
+		assert.EqualValues(t, result, val)
+	})
+
+	t.Run("Increase ttl", func(t *testing.T) {
+		val := "something-something-here"
+		testKeyCounter := generateCounterKey(testKey)
+		valCounter := "10"
+
+		testTTL := 10 * time.Second
+
+		_ = m.Set(testKey, val)
+		m.SetTTL(testKey, testTTL)
+
+		_ = m.Set(testKeyCounter, valCounter)
+
+		assert.True(t, m.Exists(testKey))
+		assert.True(t, m.Exists(testKeyCounter))
+
+		validateCounter, err := m.Get(testKeyCounter)
+		assert.NoError(t, err)
+		assert.Equal(t, valCounter, validateCounter)
+
+		result, err := k.Get(testKey)
+		assert.NoError(t, err)
+		assert.EqualValues(t, result, val)
+
+		assert.Equal(t, 20*time.Second, m.TTL(testKey))
 	})
 }
 
@@ -220,6 +281,192 @@ func TestGetOrSet(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Nil(t, myVar)
+	})
+}
+
+func TestStore(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	val := TestStruct{
+		TestString:     "string",
+		TestInt64:      1640995120740899877,
+		TestFloat64:    234.23324,
+		TestTime:       time.UnixMilli(3276483223),
+		TestNilString:  nil,
+		TestNilInt64:   nil,
+		TestNilFloat64: nil,
+		TestNilTime:    nil,
+	}
+
+	valByte, err := json.Marshal(val)
+	require.NoError(t, err)
+
+	t.Run("Disable Caching", func(t *testing.T) {
+		k.SetDisableCaching(true)
+		defer k.SetDisableCaching(false)
+
+		testKey := "store-new-key-disable-caching"
+		assert.False(t, m.Exists(testKey))
+
+		mu, err := k.AcquireLock(testKey)
+		assert.NoError(t, err)
+
+		marshalCache, err := json.Marshal(val)
+		assert.NoError(t, err)
+		cacheItem := NewItem(testKey, marshalCache)
+
+		err = k.Store(mu, cacheItem)
+		require.NoError(t, err)
+
+		assert.False(t, m.Exists(testKey))
+	})
+
+	t.Run("Disable Dynamic TTL", func(t *testing.T) {
+		k.SetDisableDynamicTTL(true)
+		defer k.SetDisableDynamicTTL(false)
+
+		testKey := "store-new-key-disable-dynamic-ttl"
+		assert.False(t, m.Exists(testKey))
+
+		mu, err := k.AcquireLock(testKey)
+		assert.NoError(t, err)
+
+		marshalCache, err := json.Marshal(val)
+		assert.NoError(t, err)
+		cacheItem := NewItem(testKey, marshalCache)
+
+		err = k.Store(mu, cacheItem)
+		require.NoError(t, err)
+		assert.True(t, m.Exists(testKey))
+
+		cachedValue, err := m.Get(testKey)
+		require.NoError(t, err)
+		assert.Equal(t, string(valByte), cachedValue)
+
+		assert.False(t, m.Exists(generateCounterKey(testKey)))
+	})
+
+	t.Run("Success", func(t *testing.T) {
+		testKey := "store-new-key"
+		assert.False(t, m.Exists(testKey))
+
+		mu, err := k.AcquireLock(testKey)
+		assert.NoError(t, err)
+
+		marshalCache, err := json.Marshal(val)
+		assert.NoError(t, err)
+		cacheItem := NewItem(testKey, marshalCache)
+
+		err = k.Store(mu, cacheItem)
+		require.NoError(t, err)
+		assert.True(t, m.Exists(testKey))
+
+		cachedValue, err := m.Get(testKey)
+		require.NoError(t, err)
+		assert.Equal(t, string(valByte), cachedValue)
+
+		assert.True(t, m.Exists(generateCounterKey(testKey)))
+
+		cachedValue, err = m.Get(generateCounterKey(testKey))
+		require.NoError(t, err)
+		assert.Equal(t, "0", cachedValue)
+	})
+}
+
+func TestStoreWithoutBlocking(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	val := TestStruct{
+		TestString:     "string",
+		TestInt64:      1640995120740899877,
+		TestFloat64:    234.23324,
+		TestTime:       time.UnixMilli(3276483223),
+		TestNilString:  nil,
+		TestNilInt64:   nil,
+		TestNilFloat64: nil,
+		TestNilTime:    nil,
+	}
+
+	valByte, err := json.Marshal(val)
+	require.NoError(t, err)
+
+	testKey := "store-new-key"
+
+	t.Run("Disable Caching", func(t *testing.T) {
+		k.SetDisableCaching(true)
+		defer k.SetDisableCaching(false)
+
+		assert.False(t, m.Exists(testKey))
+
+		marshalCache, err := json.Marshal(val)
+		assert.NoError(t, err)
+		cacheItem := NewItem(testKey, marshalCache)
+
+		err = k.StoreWithoutBlocking(cacheItem)
+		require.NoError(t, err)
+
+		assert.False(t, m.Exists(testKey))
+	})
+
+	t.Run("Disable Dynamic TTL", func(t *testing.T) {
+		k.SetDisableDynamicTTL(true)
+		defer k.SetDisableDynamicTTL(false)
+
+		testKey := "store-new-key-disable-dynamic-ttl"
+
+		assert.False(t, m.Exists(testKey))
+
+		marshalCache, err := json.Marshal(val)
+		assert.NoError(t, err)
+		cacheItem := NewItem(testKey, marshalCache)
+
+		err = k.StoreWithoutBlocking(cacheItem)
+		require.NoError(t, err)
+		assert.True(t, m.Exists(testKey))
+
+		cachedValue, err := m.Get(testKey)
+		require.NoError(t, err)
+		assert.Equal(t, string(valByte), cachedValue)
+
+		assert.False(t, m.Exists(generateCounterKey(testKey)))
+	})
+
+	t.Run("Success", func(t *testing.T) {
+		assert.False(t, m.Exists(testKey))
+
+		marshalCache, err := json.Marshal(val)
+		assert.NoError(t, err)
+		cacheItem := NewItem(testKey, marshalCache)
+
+		err = k.StoreWithoutBlocking(cacheItem)
+		require.NoError(t, err)
+		assert.True(t, m.Exists(testKey))
+
+		cachedValue, err := m.Get(testKey)
+		require.NoError(t, err)
+		assert.Equal(t, string(valByte), cachedValue)
+
+		assert.True(t, m.Exists(generateCounterKey(testKey)))
+
+		cachedValue, err = m.Get(generateCounterKey(testKey))
+		require.NoError(t, err)
+		assert.Equal(t, "0", cachedValue)
 	})
 }
 

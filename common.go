@@ -1,6 +1,8 @@
 package cacher
 
 import (
+	"encoding/json"
+	"fmt"
 	"strconv"
 
 	redigo "github.com/gomodule/redigo/redis"
@@ -45,34 +47,44 @@ func getOffset(page, limit int64) int64 {
 	return offset
 }
 
-func get(client redigo.Conn, key string) (value any, err error) {
+func get(client redigo.Conn, key string, counterKey string) (value any, counter int, err error) {
 	defer func() {
 		_ = client.Close()
 	}()
 
 	err = client.Send("MULTI")
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	err = client.Send("EXISTS", key)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	err = client.Send("GET", key)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	err = client.Send("GET", counterKey)
+	if err != nil {
+		return nil, 0, err
 	}
 	res, err := redigo.Values(client.Do("EXEC"))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	val, ok := res[0].(int64)
 	if !ok || val <= 0 {
-		return nil, ErrKeyNotExist
+		return nil, 0, ErrKeyNotExist
 	}
 
-	return res[1], nil
+	bt, _ := res[2].([]byte)
+	err = json.Unmarshal(bt, &counter)
+	if err != nil {
+		return res[1], 0, nil
+	}
+
+	return res[1], counter, nil
 }
 
 func getHashMember(client redigo.Conn, identifier, key string) (value any, err error) {
@@ -103,4 +115,8 @@ func getHashMember(client redigo.Conn, identifier, key string) (value any, err e
 	}
 
 	return res[1], nil
+}
+
+func generateCounterKey(key string) string {
+	return fmt.Sprintf("%s:dynamic:ttl:counter", key)
 }

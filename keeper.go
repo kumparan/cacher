@@ -14,11 +14,12 @@ import (
 
 const (
 	// Override these when constructing the cache keeper
-	defaultTTL          = 10 * time.Second
-	defaultNilTTL       = 5 * time.Minute
-	defaultLockDuration = 1 * time.Minute
-	defaultLockTries    = 1
-	defaultWaitTime     = 15 * time.Second
+	defaultTTL                 = 10 * time.Second
+	defaultNilTTL              = 5 * time.Minute
+	defaultLockDuration        = 1 * time.Minute
+	defaultLockTries           = 1
+	defaultWaitTime            = 15 * time.Second
+	defaultThresholdDynamicTTL = 10
 )
 
 var nilValue = []byte("null")
@@ -52,6 +53,8 @@ type (
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
 		SetDisableCaching(bool)
+		SetDisableDynamicTTL(bool)
+		SetThresholdDynamicTTL(int)
 
 		CheckKeyExist(string) (bool, error)
 
@@ -84,6 +87,9 @@ type (
 		waitTime       time.Duration
 		disableCaching bool
 
+		disableDynamicTTL   bool
+		thresholdDynamicTTL int
+
 		lockConnPool *redigo.Pool
 		lockDuration time.Duration
 		lockTries    int
@@ -93,12 +99,14 @@ type (
 // NewKeeper :nodoc:
 func NewKeeper() Keeper {
 	return &keeper{
-		defaultTTL:     defaultTTL,
-		nilTTL:         defaultNilTTL,
-		lockDuration:   defaultLockDuration,
-		lockTries:      defaultLockTries,
-		waitTime:       defaultWaitTime,
-		disableCaching: false,
+		defaultTTL:          defaultTTL,
+		nilTTL:              defaultNilTTL,
+		lockDuration:        defaultLockDuration,
+		lockTries:           defaultLockTries,
+		waitTime:            defaultWaitTime,
+		disableCaching:      false,
+		disableDynamicTTL:   false,
+		thresholdDynamicTTL: defaultThresholdDynamicTTL,
 	}
 }
 
@@ -141,18 +149,44 @@ func (k *keeper) SetDisableCaching(b bool) {
 	k.disableCaching = b
 }
 
+// SetDisableDynamicTTL :nodoc:
+func (k *keeper) SetDisableDynamicTTL(b bool) {
+	k.disableDynamicTTL = b
+}
+
+// SetThresholdDynamicTTL :nodoc:
+func (k *keeper) SetThresholdDynamicTTL(t int) {
+	k.thresholdDynamicTTL = t
+}
+
 // Get :nodoc:
 func (k *keeper) Get(key string) (cachedItem any, err error) {
 	if k.disableCaching {
 		return
 	}
 
-	cachedItem, err = get(k.connPool.Get(), key)
-	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
+	counterKey := generateCounterKey(key)
+	cachedItem, counter, err := get(k.connPool.Get(), key, counterKey)
+	switch err {
+	case nil, ErrKeyNotExist, redigo.ErrNil:
+	default:
 		return
 	}
 
-	return nil, nil
+	if cachedItem == nil {
+		return nil, nil
+	}
+
+	if k.disableDynamicTTL {
+		return
+	}
+
+	err = k.incrementTTL(key, counterKey, counter)
+	if err != nil {
+		return nil, err
+	}
+
+	return
 }
 
 // GetOrLock :nodoc:
@@ -161,8 +195,12 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 		return
 	}
 
-	cachedItem, err = get(k.connPool.Get(), key)
-	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
+	cachedItem, err = k.Get(key)
+	if err != nil {
+		return
+	}
+
+	if cachedItem != nil {
 		return
 	}
 
@@ -180,19 +218,20 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 		}
 
 		if !k.isLocked(key) {
-			cachedItem, err = get(k.connPool.Get(), key)
+			cachedItem, err = k.Get(key)
 			if err != nil {
-				if err == ErrKeyNotExist {
-					mutex, err = k.AcquireLock(key)
-					if err == nil {
-						return nil, mutex, nil
-					}
-
-					goto Wait
-				}
 				return nil, nil, err
 			}
-			return cachedItem, nil, nil
+
+			if cachedItem != nil {
+				return cachedItem, nil, nil
+			}
+			mutex, err = k.AcquireLock(key)
+			if err == nil {
+				return nil, mutex, nil
+			}
+
+			goto Wait
 		}
 
 	Wait:
@@ -258,13 +297,7 @@ func (k *keeper) Store(mutex *redsync.Mutex, c Item) error {
 	}
 	defer SafeUnlock(mutex)
 
-	client := k.connPool.Get()
-	defer func() {
-		_ = client.Close()
-	}()
-
-	_, err := client.Do("SETEX", c.GetKey(), k.decideCacheTTL(c), c.GetValue())
-	return err
+	return k.StoreWithoutBlocking(c)
 }
 
 // StoreWithoutBlocking :nodoc:
@@ -278,7 +311,22 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 		_ = client.Close()
 	}()
 
-	_, err := client.Do("SETEX", c.GetKey(), k.decideCacheTTL(c), c.GetValue())
+	err := client.Send("MULTI")
+	if err != nil {
+		return err
+	}
+	err = client.Send("SETEX", c.GetKey(), k.decideCacheTTL(c), c.GetValue())
+	if err != nil {
+		return err
+	}
+	if !k.disableDynamicTTL {
+		err = client.Send("SET", generateCounterKey(c.GetKey()), 0)
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err = redigo.Values(client.Do("EXEC"))
 	return err
 }
 
@@ -384,7 +432,7 @@ func (k *keeper) DeleteByKeys(keys []string) error {
 
 	var redisKeys []any
 	for _, key := range keys {
-		redisKeys = append(redisKeys, key)
+		redisKeys = append(redisKeys, key, generateCounterKey(key))
 	}
 
 	_, err := client.Do("DEL", redisKeys...)
@@ -408,6 +456,15 @@ func (k *keeper) StoreMultiWithoutBlocking(items []Item) error {
 	}
 	for _, item := range items {
 		err = client.Send("SETEX", item.GetKey(), k.decideCacheTTL(item), item.GetValue())
+		if err != nil {
+			return err
+		}
+
+		if k.disableDynamicTTL {
+			continue
+		}
+
+		err = client.Send("SET", generateCounterKey(item.GetKey()), 0)
 		if err != nil {
 			return err
 		}
@@ -441,6 +498,16 @@ func (k *keeper) StoreMultiPersist(items []Item) error {
 		if err != nil {
 			return err
 		}
+
+		if k.disableDynamicTTL {
+			continue
+		}
+
+		err = client.Send("SET", generateCounterKey(item.GetKey()), 0)
+		if err != nil {
+			return err
+		}
+
 	}
 
 	_, err = client.Do("EXEC")
@@ -872,4 +939,26 @@ func (k *keeper) isLocked(key string) bool {
 	}
 
 	return true
+}
+
+func (k *keeper) incrementTTL(key, counterKey string, counter int) (err error) {
+	if counter < k.thresholdDynamicTTL {
+		return k.IncreaseCachedValueByOne(counterKey)
+	}
+
+	client := k.connPool.Get()
+	defer func() {
+		_ = client.Close()
+	}()
+
+	val, err := client.Do("TTL", key)
+	if err != nil {
+		return
+	}
+	ttl := val.(int64)
+
+	sumTTL := ttl + int64(k.defaultTTL.Seconds())
+	_, err = client.Do("EXPIRE", key, sumTTL)
+
+	return
 }
