@@ -1177,13 +1177,12 @@ func TestGetMultiple(t *testing.T) {
 	k.SetLockConnectionPool(r)
 	k.SetWaitTime(1 * time.Second) // override wait time to 1 second
 
-	keys := []string{"a", "b", "c"}
-	items := map[string]string{"a": "A", "b": "B", "c": "C"}
-	for key, val := range items {
-		k.StoreWithoutBlocking(NewItem(key, val))
-	}
-
 	t.Run("success", func(t *testing.T) {
+		keys := []string{"a", "b", "c"}
+		items := map[string]string{"a": "A", "b": "B", "c": "C"}
+		for key, val := range items {
+			k.StoreWithoutBlocking(NewItem(key, val))
+		}
 		res, err := k.GetMultiple(keys)
 		assert.NoError(t, err)
 		for i, key := range keys {
@@ -1192,12 +1191,20 @@ func TestGetMultiple(t *testing.T) {
 	})
 
 	t.Run("success with missing cache", func(t *testing.T) {
-		keys2 := append(keys, "d")
-		res, err := k.GetMultiple(keys2)
+		keys := []string{"d", "b", "a", "o", "c"}
+		items := map[string]string{"b": "B", "o": "O"}
+		for key, val := range items {
+			k.StoreWithoutBlocking(NewItem(key, val))
+		}
+
+		res, err := k.GetMultiple(keys)
 		assert.NoError(t, err)
 		for i, key := range keys {
+			if _, ok := items[key]; !ok {
+				assert.EqualValues(t, nil, res[i])
+				continue
+			}
 			assert.EqualValues(t, items[key], res[i])
 		}
-		assert.EqualValues(t, res[len(res)-1], nil)
 	})
 }

@@ -162,13 +162,19 @@ func (k *keeper) GetMultiple(keys []string) (cachedItems []any, err error) {
 		return
 	}
 	c := k.connPool.Get()
-	c.Send("MULTI")
+
+	err = c.Send("MULTI")
+	if err != nil {
+		return nil, err
+	}
+
 	for _, key := range keys {
 		err = c.Send("GET", key)
 		if err != nil {
 			return
 		}
 	}
+
 	r, err := c.Do("EXEC")
 	if err != nil {
 		return nil, err
