@@ -117,6 +117,6 @@ func getHashMember(client redigo.Conn, identifier, key string) (value any, err e
 	return res[1], nil
 }
 
-func generateCounterKey(key string) string {
-	return fmt.Sprintf("%s:dynamic:ttl:counter", key)
+func generateCacheHitKey(key string) string {
+	return fmt.Sprintf("%s:cache:hit:counter", key)
 }

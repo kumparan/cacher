@@ -165,7 +165,7 @@ func (k *keeper) Get(key string) (cachedItem any, err error) {
 		return
 	}
 
-	counterKey := generateCounterKey(key)
+	counterKey := generateCacheHitKey(key)
 	cachedItem, counter, err := get(k.connPool.Get(), key, counterKey)
 	switch err {
 	case nil, ErrKeyNotExist, redigo.ErrNil:
@@ -320,7 +320,7 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 		return err
 	}
 	if !k.disableDynamicTTL {
-		err = client.Send("SET", generateCounterKey(c.GetKey()), 0)
+		err = client.Send("SET", generateCacheHitKey(c.GetKey()), 0)
 		if err != nil {
 			return err
 		}
@@ -432,7 +432,7 @@ func (k *keeper) DeleteByKeys(keys []string) error {
 
 	var redisKeys []any
 	for _, key := range keys {
-		redisKeys = append(redisKeys, key, generateCounterKey(key))
+		redisKeys = append(redisKeys, key, generateCacheHitKey(key))
 	}
 
 	_, err := client.Do("DEL", redisKeys...)
@@ -464,7 +464,7 @@ func (k *keeper) StoreMultiWithoutBlocking(items []Item) error {
 			continue
 		}
 
-		err = client.Send("SET", generateCounterKey(item.GetKey()), 0)
+		err = client.Send("SET", generateCacheHitKey(item.GetKey()), 0)
 		if err != nil {
 			return err
 		}
@@ -503,7 +503,7 @@ func (k *keeper) StoreMultiPersist(items []Item) error {
 			continue
 		}
 
-		err = client.Send("SET", generateCounterKey(item.GetKey()), 0)
+		err = client.Send("SET", generateCacheHitKey(item.GetKey()), 0)
 		if err != nil {
 			return err
 		}

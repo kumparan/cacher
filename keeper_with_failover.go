@@ -103,7 +103,7 @@ func (k *KeeperWithFailover) GetFailover(key string) (cachedItem any, err error)
 		return
 	}
 
-	counterKey := generateCounterKey(key)
+	counterKey := generateCacheHitKey(key)
 	cachedItem, counter, err := get(k.failoverConnPool.Get(), key, counterKey)
 	switch err {
 	case nil, ErrKeyNotExist, redigo.ErrNil:
@@ -147,7 +147,7 @@ func (k *KeeperWithFailover) StoreFailover(c Item) error {
 		return err
 	}
 	if !k.disableDynamicTTL {
-		err = client.Send("SET", generateCounterKey(c.GetKey()), 0)
+		err = client.Send("SET", generateCacheHitKey(c.GetKey()), 0)
 		if err != nil {
 			return err
 		}
@@ -272,7 +272,7 @@ func (k *KeeperWithFailover) DeleteByKeys(keys []string) error {
 	}()
 	var redisKeys []any
 	for _, key := range keys {
-		redisKeys = append(redisKeys, key, generateCounterKey(key))
+		redisKeys = append(redisKeys, key, generateCacheHitKey(key))
 	}
 
 	var errs *multierror.Error

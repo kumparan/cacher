@@ -103,7 +103,7 @@ func TestGet(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Nil(t, result)
 
-		assert.False(t, m.Exists(generateCounterKey(testKey)))
+		assert.False(t, m.Exists(generateCacheHitKey(testKey)))
 	})
 
 	t.Run("Exist", func(t *testing.T) {
@@ -115,8 +115,8 @@ func TestGet(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, result, val)
 
-		assert.True(t, m.Exists(generateCounterKey(testKey)))
-		counter, err := m.Get(generateCounterKey(testKey))
+		assert.True(t, m.Exists(generateCacheHitKey(testKey)))
+		counter, err := m.Get(generateCacheHitKey(testKey))
 		assert.NoError(t, err)
 		assert.Equal(t, "1", counter)
 	})
@@ -130,7 +130,7 @@ func TestGet(t *testing.T) {
 		val := "something-something-here"
 		_ = m.Set(testKey, val)
 
-		assert.False(t, m.Exists(generateCounterKey(testKey)))
+		assert.False(t, m.Exists(generateCacheHitKey(testKey)))
 
 		assert.True(t, m.Exists(testKey))
 		result, err := k.Get(testKey)
@@ -140,7 +140,7 @@ func TestGet(t *testing.T) {
 
 	t.Run("Increase ttl", func(t *testing.T) {
 		val := "something-something-here"
-		testKeyCounter := generateCounterKey(testKey)
+		testKeyCounter := generateCacheHitKey(testKey)
 		valCounter := "10"
 
 		testTTL := 10 * time.Second
@@ -351,7 +351,7 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, string(valByte), cachedValue)
 
-		assert.False(t, m.Exists(generateCounterKey(testKey)))
+		assert.False(t, m.Exists(generateCacheHitKey(testKey)))
 	})
 
 	t.Run("Success", func(t *testing.T) {
@@ -373,9 +373,9 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, string(valByte), cachedValue)
 
-		assert.True(t, m.Exists(generateCounterKey(testKey)))
+		assert.True(t, m.Exists(generateCacheHitKey(testKey)))
 
-		cachedValue, err = m.Get(generateCounterKey(testKey))
+		cachedValue, err = m.Get(generateCacheHitKey(testKey))
 		require.NoError(t, err)
 		assert.Equal(t, "0", cachedValue)
 	})
@@ -444,7 +444,7 @@ func TestStoreWithoutBlocking(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, string(valByte), cachedValue)
 
-		assert.False(t, m.Exists(generateCounterKey(testKey)))
+		assert.False(t, m.Exists(generateCacheHitKey(testKey)))
 	})
 
 	t.Run("Success", func(t *testing.T) {
@@ -462,9 +462,9 @@ func TestStoreWithoutBlocking(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, string(valByte), cachedValue)
 
-		assert.True(t, m.Exists(generateCounterKey(testKey)))
+		assert.True(t, m.Exists(generateCacheHitKey(testKey)))
 
-		cachedValue, err = m.Get(generateCounterKey(testKey))
+		cachedValue, err = m.Get(generateCacheHitKey(testKey))
 		require.NoError(t, err)
 		assert.Equal(t, "0", cachedValue)
 	})
