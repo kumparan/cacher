@@ -116,9 +116,9 @@ func TestGet(t *testing.T) {
 		assert.EqualValues(t, result, val)
 
 		assert.True(t, m.Exists(generateCacheHitKey(testKey)))
-		counter, err := m.Get(generateCacheHitKey(testKey))
+		cacheHit, err := m.Get(generateCacheHitKey(testKey))
 		assert.NoError(t, err)
-		assert.Equal(t, "1", counter)
+		assert.Equal(t, "1", cacheHit)
 	})
 
 	t.Run("Disable Dynamic TTL", func(t *testing.T) {
@@ -140,22 +140,22 @@ func TestGet(t *testing.T) {
 
 	t.Run("Increase ttl", func(t *testing.T) {
 		val := "something-something-here"
-		testKeyCounter := generateCacheHitKey(testKey)
-		valCounter := "10"
+		testKeyCacheHit := generateCacheHitKey(testKey)
+		valCacheHit := "10"
 
 		testTTL := 10 * time.Second
 
 		_ = m.Set(testKey, val)
 		m.SetTTL(testKey, testTTL)
 
-		_ = m.Set(testKeyCounter, valCounter)
+		_ = m.Set(testKeyCacheHit, valCacheHit)
 
 		assert.True(t, m.Exists(testKey))
-		assert.True(t, m.Exists(testKeyCounter))
+		assert.True(t, m.Exists(testKeyCacheHit))
 
-		validateCounter, err := m.Get(testKeyCounter)
+		validateCacheHit, err := m.Get(testKeyCacheHit)
 		assert.NoError(t, err)
-		assert.Equal(t, valCounter, validateCounter)
+		assert.Equal(t, valCacheHit, validateCacheHit)
 
 		result, err := k.Get(testKey)
 		assert.NoError(t, err)

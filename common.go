@@ -47,7 +47,7 @@ func getOffset(page, limit int64) int64 {
 	return offset
 }
 
-func get(client redigo.Conn, key string, counterKey string) (value any, counter int, err error) {
+func get(client redigo.Conn, key string, cacheHitKey string) (value any, cacheHit int, err error) {
 	defer func() {
 		_ = client.Close()
 	}()
@@ -64,7 +64,7 @@ func get(client redigo.Conn, key string, counterKey string) (value any, counter 
 	if err != nil {
 		return nil, 0, err
 	}
-	err = client.Send("GET", counterKey)
+	err = client.Send("GET", cacheHitKey)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -79,12 +79,12 @@ func get(client redigo.Conn, key string, counterKey string) (value any, counter 
 	}
 
 	bt, _ := res[2].([]byte)
-	err = json.Unmarshal(bt, &counter)
+	err = json.Unmarshal(bt, &cacheHit)
 	if err != nil {
 		return res[1], 0, nil
 	}
 
-	return res[1], counter, nil
+	return res[1], cacheHit, nil
 }
 
 func getHashMember(client redigo.Conn, identifier, key string) (value any, err error) {

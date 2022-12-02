@@ -165,8 +165,8 @@ func (k *keeper) Get(key string) (cachedItem any, err error) {
 		return
 	}
 
-	counterKey := generateCacheHitKey(key)
-	cachedItem, counter, err := get(k.connPool.Get(), key, counterKey)
+	cacheHitKey := generateCacheHitKey(key)
+	cachedItem, cacheHit, err := get(k.connPool.Get(), key, cacheHitKey)
 	switch err {
 	case nil, ErrKeyNotExist, redigo.ErrNil:
 	default:
@@ -181,7 +181,7 @@ func (k *keeper) Get(key string) (cachedItem any, err error) {
 		return
 	}
 
-	err = k.incrementTTL(key, counterKey, counter)
+	err = k.incrementTTL(key, cacheHitKey, cacheHit)
 	if err != nil {
 		return nil, err
 	}
@@ -941,9 +941,9 @@ func (k *keeper) isLocked(key string) bool {
 	return true
 }
 
-func (k *keeper) incrementTTL(key, counterKey string, counter int) (err error) {
-	if counter < k.thresholdDynamicTTL {
-		return k.IncreaseCachedValueByOne(counterKey)
+func (k *keeper) incrementTTL(key, cacheHitKey string, cacheHit int) (err error) {
+	if cacheHit < k.thresholdDynamicTTL {
+		return k.IncreaseCachedValueByOne(cacheHitKey)
 	}
 
 	client := k.connPool.Get()
