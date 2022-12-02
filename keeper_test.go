@@ -329,31 +329,6 @@ func TestStore(t *testing.T) {
 		assert.False(t, m.Exists(testKey))
 	})
 
-	t.Run("Disable Dynamic TTL", func(t *testing.T) {
-		k.SetDisableDynamicTTL(true)
-		defer k.SetDisableDynamicTTL(false)
-
-		testKey := "store-new-key-disable-dynamic-ttl"
-		assert.False(t, m.Exists(testKey))
-
-		mu, err := k.AcquireLock(testKey)
-		assert.NoError(t, err)
-
-		marshalCache, err := json.Marshal(val)
-		assert.NoError(t, err)
-		cacheItem := NewItem(testKey, marshalCache)
-
-		err = k.Store(mu, cacheItem)
-		require.NoError(t, err)
-		assert.True(t, m.Exists(testKey))
-
-		cachedValue, err := m.Get(testKey)
-		require.NoError(t, err)
-		assert.Equal(t, string(valByte), cachedValue)
-
-		assert.False(t, m.Exists(generateCacheHitKey(testKey)))
-	})
-
 	t.Run("Success", func(t *testing.T) {
 		testKey := "store-new-key"
 		assert.False(t, m.Exists(testKey))
@@ -372,12 +347,6 @@ func TestStore(t *testing.T) {
 		cachedValue, err := m.Get(testKey)
 		require.NoError(t, err)
 		assert.Equal(t, string(valByte), cachedValue)
-
-		assert.True(t, m.Exists(generateCacheHitKey(testKey)))
-
-		cachedValue, err = m.Get(generateCacheHitKey(testKey))
-		require.NoError(t, err)
-		assert.Equal(t, "0", cachedValue)
 	})
 }
 
@@ -424,29 +393,6 @@ func TestStoreWithoutBlocking(t *testing.T) {
 		assert.False(t, m.Exists(testKey))
 	})
 
-	t.Run("Disable Dynamic TTL", func(t *testing.T) {
-		k.SetDisableDynamicTTL(true)
-		defer k.SetDisableDynamicTTL(false)
-
-		testKey := "store-new-key-disable-dynamic-ttl"
-
-		assert.False(t, m.Exists(testKey))
-
-		marshalCache, err := json.Marshal(val)
-		assert.NoError(t, err)
-		cacheItem := NewItem(testKey, marshalCache)
-
-		err = k.StoreWithoutBlocking(cacheItem)
-		require.NoError(t, err)
-		assert.True(t, m.Exists(testKey))
-
-		cachedValue, err := m.Get(testKey)
-		require.NoError(t, err)
-		assert.Equal(t, string(valByte), cachedValue)
-
-		assert.False(t, m.Exists(generateCacheHitKey(testKey)))
-	})
-
 	t.Run("Success", func(t *testing.T) {
 		assert.False(t, m.Exists(testKey))
 
@@ -461,12 +407,6 @@ func TestStoreWithoutBlocking(t *testing.T) {
 		cachedValue, err := m.Get(testKey)
 		require.NoError(t, err)
 		assert.Equal(t, string(valByte), cachedValue)
-
-		assert.True(t, m.Exists(generateCacheHitKey(testKey)))
-
-		cachedValue, err = m.Get(generateCacheHitKey(testKey))
-		require.NoError(t, err)
-		assert.Equal(t, "0", cachedValue)
 	})
 }
 

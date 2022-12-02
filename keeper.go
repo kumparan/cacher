@@ -311,22 +311,7 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 		_ = client.Close()
 	}()
 
-	err := client.Send("MULTI")
-	if err != nil {
-		return err
-	}
-	err = client.Send("SETEX", c.GetKey(), k.decideCacheTTL(c), c.GetValue())
-	if err != nil {
-		return err
-	}
-	if !k.disableDynamicTTL {
-		err = client.Send("SET", generateCacheHitKey(c.GetKey()), 0)
-		if err != nil {
-			return err
-		}
-	}
-
-	_, err = redigo.Values(client.Do("EXEC"))
+	_, err := client.Do("SETEX", c.GetKey(), k.decideCacheTTL(c), c.GetValue())
 	return err
 }
 
