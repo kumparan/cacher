@@ -86,6 +86,7 @@ func TestGet(t *testing.T) {
 	k.SetConnectionPool(r)
 	k.SetLockConnectionPool(r)
 	k.SetWaitTime(1 * time.Second) // override wait time to 1 second
+	k.SetEnableDynamicTTL(true)
 
 	testKey := "test-key"
 
@@ -122,8 +123,8 @@ func TestGet(t *testing.T) {
 	})
 
 	t.Run("Disable Dynamic TTL", func(t *testing.T) {
-		k.SetDisableDynamicTTL(true)
-		defer k.SetDisableDynamicTTL(false)
+		k.SetEnableDynamicTTL(false)
+		defer k.SetEnableDynamicTTL(true)
 
 		testKey := "test-key-disable-ttl"
 

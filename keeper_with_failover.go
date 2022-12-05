@@ -115,7 +115,7 @@ func (k *KeeperWithFailover) GetFailover(key string) (cachedItem any, err error)
 		return nil, nil
 	}
 
-	if k.disableDynamicTTL {
+	if !k.enableDynamicTTL {
 		return
 	}
 

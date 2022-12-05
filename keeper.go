@@ -53,7 +53,7 @@ type (
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
 		SetDisableCaching(bool)
-		SetDisableDynamicTTL(bool)
+		SetEnableDynamicTTL(bool)
 		SetThresholdDynamicTTL(int)
 
 		CheckKeyExist(string) (bool, error)
@@ -87,7 +87,7 @@ type (
 		waitTime       time.Duration
 		disableCaching bool
 
-		disableDynamicTTL   bool
+		enableDynamicTTL    bool
 		thresholdDynamicTTL int
 
 		lockConnPool *redigo.Pool
@@ -105,7 +105,7 @@ func NewKeeper() Keeper {
 		lockTries:           defaultLockTries,
 		waitTime:            defaultWaitTime,
 		disableCaching:      false,
-		disableDynamicTTL:   false,
+		enableDynamicTTL:    false,
 		thresholdDynamicTTL: defaultThresholdDynamicTTL,
 	}
 }
@@ -150,8 +150,8 @@ func (k *keeper) SetDisableCaching(b bool) {
 }
 
 // SetDisableDynamicTTL :nodoc:
-func (k *keeper) SetDisableDynamicTTL(b bool) {
-	k.disableDynamicTTL = b
+func (k *keeper) SetEnableDynamicTTL(b bool) {
+	k.enableDynamicTTL = b
 }
 
 // SetThresholdDynamicTTL :nodoc:
@@ -177,7 +177,7 @@ func (k *keeper) Get(key string) (cachedItem any, err error) {
 		return nil, nil
 	}
 
-	if k.disableDynamicTTL {
+	if !k.enableDynamicTTL {
 		return
 	}
 
@@ -445,7 +445,7 @@ func (k *keeper) StoreMultiWithoutBlocking(items []Item) error {
 			return err
 		}
 
-		if k.disableDynamicTTL {
+		if !k.enableDynamicTTL {
 			continue
 		}
 
@@ -484,7 +484,7 @@ func (k *keeper) StoreMultiPersist(items []Item) error {
 			return err
 		}
 
-		if k.disableDynamicTTL {
+		if !k.enableDynamicTTL {
 			continue
 		}
 
