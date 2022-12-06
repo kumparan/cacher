@@ -943,7 +943,21 @@ func (k *keeper) incrementTTL(key, cacheHitKey string, cacheHit int) (err error)
 	ttl := val.(int64)
 
 	sumTTL := ttl + int64(k.defaultTTL.Seconds())
-	_, err = client.Do("EXPIRE", key, sumTTL)
 
-	return
+	err = client.Send("MULTI")
+	if err != nil {
+		return err
+	}
+	err = client.Send("EXPIRE", key, sumTTL)
+	if err != nil {
+		return err
+	}
+	err = client.Send("DEL", cacheHitKey)
+	if err != nil {
+		return err
+	}
+
+	_, err = client.Do("EXEC")
+
+	return err
 }
