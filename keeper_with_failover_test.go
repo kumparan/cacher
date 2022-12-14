@@ -31,7 +31,7 @@ func Test_keeperWithFailover_GetOrSet(t *testing.T) {
 		TestString:     "string",
 		TestInt64:      1640995120740899877,
 		TestFloat64:    234.23324,
-		TestTime:       time.UnixMilli(3276483223),
+		TestTime:       time.UnixMilli(3276483223).UTC(),
 		TestNilString:  nil,
 		TestNilInt64:   nil,
 		TestNilFloat64: nil,
@@ -149,7 +149,7 @@ func Test_keeperWithFailover_GetHashMemberOrSet(t *testing.T) {
 		TestString:     "string",
 		TestInt64:      1640995120740899877,
 		TestFloat64:    234.23324,
-		TestTime:       time.UnixMilli(3276483223),
+		TestTime:       time.UnixMilli(3276483223).UTC(),
 		TestNilString:  nil,
 		TestNilInt64:   nil,
 		TestNilFloat64: nil,
@@ -246,7 +246,6 @@ func Test_keeperWithFailover_GetHashMemberOrSet(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, myVar)
 	})
-
 }
 
 func Test_keeperWithFailover_StoreNil(t *testing.T) {
@@ -353,5 +352,5 @@ func Test_keeperWithFailover_DeleteHashMember(t *testing.T) {
 	assert.True(t, m.Exists(identifier) && mFO.Exists(identifier))
 	err = k.DeleteHashMember(identifier, "key")
 	assert.NoError(t, err)
-	assert.False(t, m.Exists(identifier) || m.Exists(identifier))
+	assert.False(t, m.Exists(identifier))
 }
