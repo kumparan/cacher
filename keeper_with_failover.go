@@ -3,8 +3,9 @@ package cacher
 import (
 	"encoding/json"
 	"errors"
-	"github.com/hashicorp/go-multierror"
 	"time"
+
+	"github.com/hashicorp/go-multierror"
 
 	redigo "github.com/gomodule/redigo/redis"
 )
@@ -217,6 +218,7 @@ func (k *KeeperWithFailover) StoreHashMemberFailover(identifier string, c Item) 
 	return
 }
 
+// StoreNil :nodoc:
 func (k *KeeperWithFailover) StoreNil(cacheKey string) error {
 	item := NewItemWithCustomTTL(cacheKey, nilValue, k.nilTTL)
 	var errs *multierror.Error
@@ -224,6 +226,7 @@ func (k *KeeperWithFailover) StoreNil(cacheKey string) error {
 	return errs.ErrorOrNil()
 }
 
+// DeleteByKeys :nodoc:
 func (k *KeeperWithFailover) DeleteByKeys(keys []string) error {
 	if k.disableCaching {
 		return nil
@@ -250,7 +253,7 @@ func (k *KeeperWithFailover) DeleteByKeys(keys []string) error {
 }
 
 // DeleteHashMember :nodoc:
-func (k *KeeperWithFailover) DeleteHashMember(identifier string, key string) (error) {
+func (k *KeeperWithFailover) DeleteHashMember(identifier string, key string) error {
 	if k.disableCaching {
 		return nil
 	}
