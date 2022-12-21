@@ -1167,17 +1167,15 @@ func TestHashScan_Empty(t *testing.T) {
 }
 
 func TestGetMultiple(t *testing.T) {
-	k := NewKeeper()
-
-	m, err := miniredis.Run()
-	assert.NoError(t, err)
-
-	r := newRedisConn(m.Addr())
-	k.SetConnectionPool(r)
-	k.SetLockConnectionPool(r)
-	k.SetWaitTime(1 * time.Second) // override wait time to 1 second
-
 	t.Run("success", func(t *testing.T) {
+		k := NewKeeper()
+		m, err := miniredis.Run()
+		assert.NoError(t, err)
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+		k.SetWaitTime(1 * time.Second) // override wait time to 1 second
+
 		keys := []string{"a", "b", "c"}
 		items := map[string]string{"a": "A", "b": "B", "c": "C"}
 		for key, val := range items {
@@ -1191,6 +1189,14 @@ func TestGetMultiple(t *testing.T) {
 	})
 
 	t.Run("success with missing cache", func(t *testing.T) {
+		k := NewKeeper()
+		m, err := miniredis.Run()
+		assert.NoError(t, err)
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+		k.SetWaitTime(1 * time.Second) // override wait time to 1 second
+
 		keys := []string{"d", "b", "a", "o", "c"}
 		items := map[string]string{"b": "B", "o": "O"}
 		for key, val := range items {
@@ -1201,7 +1207,7 @@ func TestGetMultiple(t *testing.T) {
 		assert.NoError(t, err)
 		for i, key := range keys {
 			if _, ok := items[key]; !ok {
-				assert.EqualValues(t, nil, res[i])
+				assert.Nil(t, res[i])
 				continue
 			}
 			assert.EqualValues(t, items[key], res[i])

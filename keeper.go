@@ -33,6 +33,7 @@ type (
 		GetOrLock(key string) (any, *redsync.Mutex, error)
 		GetOrSet(key string, fn GetterFn, opts ...func(Item)) ([]byte, error)
 		GetMultiple(keys []string) ([]any, error)
+		GetMultipleTX(keys []string) ([]any, error)
 		Store(*redsync.Mutex, Item) error
 		StoreWithoutBlocking(Item) error
 		StoreMultiWithoutBlocking([]Item) error
@@ -156,8 +157,8 @@ func (k *keeper) Get(key string) (cachedItem any, err error) {
 	return nil, nil
 }
 
-// GetMultiple :nodoc:
-func (k *keeper) GetMultiple(keys []string) (cachedItems []any, err error) {
+// GetMultipleTX :nodoc:
+func (k *keeper) GetMultipleTX(keys []string) (cachedItems []any, err error) {
 	if k.disableCaching {
 		return
 	}
@@ -181,6 +182,36 @@ func (k *keeper) GetMultiple(keys []string) (cachedItems []any, err error) {
 	}
 
 	return redigo.Values(r, err)
+}
+
+// GetMultiple :nodoc:
+func (k *keeper) GetMultiple(keys []string) (cachedItems []any, err error) {
+	if k.disableCaching {
+		return
+	}
+	c := k.connPool.Get()
+
+	for _, key := range keys {
+		err = c.Send("GET", key)
+		if err != nil {
+			return
+		}
+	}
+
+	err = c.Flush()
+	if err != nil {
+		return
+	}
+
+	for _ = range keys {
+		rep, err := redigo.Bytes(c.Receive())
+		if err != nil && err != redigo.ErrNil {
+			return nil, err
+		}
+		cachedItems = append(cachedItems, rep)
+	}
+
+	return
 }
 
 // GetOrLock :nodoc:
