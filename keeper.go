@@ -163,6 +163,7 @@ func (k *keeper) GetMultipleTX(keys []string) (cachedItems []any, err error) {
 		return
 	}
 	c := k.connPool.Get()
+	defer c.Close()
 
 	err = c.Send("MULTI")
 	if err != nil {
@@ -190,6 +191,7 @@ func (k *keeper) GetMultiple(keys []string) (cachedItems []any, err error) {
 		return
 	}
 	c := k.connPool.Get()
+	defer c.Close()
 
 	for _, key := range keys {
 		err = c.Send("GET", key)
