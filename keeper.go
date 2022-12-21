@@ -209,7 +209,7 @@ func (k *keeper) GetMultiple(keys []string) (cachedItems []any, err error) {
 		return
 	}
 
-	for _ = range keys {
+	for range keys {
 		rep, err := redigo.Bytes(c.Receive())
 		if err != nil && err != redigo.ErrNil {
 			return nil, err
