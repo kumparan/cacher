@@ -1179,7 +1179,7 @@ func TestGetMultiple(t *testing.T) {
 		keys := []string{"a", "b", "c"}
 		items := map[string]string{"a": "A", "b": "B", "c": "C"}
 		for key, val := range items {
-			k.StoreWithoutBlocking(NewItem(key, val))
+			_ = k.StoreWithoutBlocking(NewItem(key, val))
 		}
 		res, err := k.GetMultiple(keys)
 		assert.NoError(t, err)
@@ -1200,7 +1200,7 @@ func TestGetMultiple(t *testing.T) {
 		keys := []string{"d", "b", "a", "o", "c"}
 		items := map[string]string{"b": "B", "o": "O"}
 		for key, val := range items {
-			k.StoreWithoutBlocking(NewItem(key, val))
+			_ = k.StoreWithoutBlocking(NewItem(key, val))
 		}
 
 		res, err := k.GetMultiple(keys)
