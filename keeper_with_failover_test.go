@@ -353,5 +353,5 @@ func Test_keeperWithFailover_DeleteHashMember(t *testing.T) {
 	assert.True(t, m.Exists(identifier) && mFO.Exists(identifier))
 	err = k.DeleteHashMember(identifier, "key")
 	assert.NoError(t, err)
-	assert.False(t, m.Exists(identifier) || m.Exists(identifier))
+	assert.False(t, m.Exists(identifier) || mFO.Exists(identifier))
 }
