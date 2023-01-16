@@ -155,7 +155,7 @@ func TestGetOrSet(t *testing.T) {
 		TestString:     "string",
 		TestInt64:      1640995120740899877,
 		TestFloat64:    234.23324,
-		TestTime:       time.UnixMilli(3276483223),
+		TestTime:       time.UnixMilli(3276483223).UTC(),
 		TestNilString:  nil,
 		TestNilInt64:   nil,
 		TestNilFloat64: nil,
@@ -237,7 +237,7 @@ func TestGetHashMemberOrSet(t *testing.T) {
 		TestString:     "string",
 		TestInt64:      1640995120740899877,
 		TestFloat64:    234.23324,
-		TestTime:       time.UnixMilli(3276483223),
+		TestTime:       time.UnixMilli(3276483223).UTC(),
 		TestNilString:  nil,
 		TestNilInt64:   nil,
 		TestNilFloat64: nil,
@@ -604,7 +604,6 @@ func TestGetLockStoreRightLeftList(t *testing.T) {
 	resultList, _ := redigo.Strings(res2, nil)
 	assert.EqualValues(t, multiList, resultList)
 	assert.NoError(t, err2)
-
 }
 
 func TestGetAndRemoveFirstAndLastListElement(t *testing.T) {
@@ -639,8 +638,8 @@ func TestGetAndRemoveFirstAndLastListElement(t *testing.T) {
 	lastElement, _ := redigo.String(res4, nil)
 	assert.EqualValues(t, lastElement, "test-response-3")
 	assert.NoError(t, err4)
-
 }
+
 func TestGetListLength(t *testing.T) {
 	// Initialize new cache keeper
 	k := NewKeeper()
@@ -664,8 +663,8 @@ func TestGetListLength(t *testing.T) {
 	res3, err3 := k.GetListLength(name)
 	assert.EqualValues(t, res3, 2)
 	assert.NoError(t, err3)
-
 }
+
 func TestGetTTL(t *testing.T) {
 	// Initialize new cache keeper
 	k := NewKeeper()
@@ -689,7 +688,6 @@ func TestGetTTL(t *testing.T) {
 	assert.NotEqual(t, ttl, 0)
 	var typeInt64 int64
 	assert.IsType(t, typeInt64, ttl)
-
 }
 
 func TestStoreNil(t *testing.T) {
@@ -855,7 +853,6 @@ func TestGetOrLock(t *testing.T) {
 	t.Run("locked got wait too long", func(t *testing.T) {
 		k := NewKeeper()
 		m, err := miniredis.Run()
-
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -884,7 +881,6 @@ func TestGetHashMemberOrLock(t *testing.T) {
 	t.Run("cache miss", func(t *testing.T) {
 		k := NewKeeper()
 		m, err := miniredis.Run()
-
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -910,7 +906,6 @@ func TestGetHashMemberOrLock(t *testing.T) {
 	t.Run("locked got nil", func(t *testing.T) {
 		k := NewKeeper()
 		m, err := miniredis.Run()
-
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -954,7 +949,6 @@ func TestGetHashMemberOrLock(t *testing.T) {
 	t.Run("locked got result", func(t *testing.T) {
 		k := NewKeeper()
 		m, err := miniredis.Run()
-
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1000,7 +994,6 @@ func TestGetHashMemberOrLock(t *testing.T) {
 	t.Run("locked got wait too long", func(t *testing.T) {
 		k := NewKeeper()
 		m, err := miniredis.Run()
-
 		if err != nil {
 			t.Fatal(err)
 		}
