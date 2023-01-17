@@ -102,7 +102,21 @@ type (
 		Key   string
 		Mutex *redsync.Mutex
 	}
+
+	errorWithKey struct {
+		key        string
+		innerError error
+	}
 )
+
+// Error implement built-in error interface
+func (ewk *errorWithKey) Error() string {
+	var msg string
+	if ewk.innerError != nil {
+		msg = ewk.innerError.Error()
+	}
+	return fmt.Sprintf("err on key %s : %s", ewk.key, msg)
+}
 
 // NewKeeper :nodoc:
 func NewKeeper() Keeper {
@@ -377,7 +391,7 @@ func (k *keeper) acquireLockOrGetValueThroughChan(key string, mutexCh chan<- mut
 					}
 					goto Wait
 				}
-				errCh <- err
+				errCh <- &errorWithKey{key: key, innerError: err}
 				return
 			}
 			itemCh <- itemWithKey{Item: cachedItem, Key: key}
@@ -387,7 +401,7 @@ func (k *keeper) acquireLockOrGetValueThroughChan(key string, mutexCh chan<- mut
 	Wait:
 		elapsed := time.Since(start)
 		if elapsed >= k.waitTime {
-			errCh <- ErrWaitTooLong
+			errCh <- &errorWithKey{key: key, innerError: ErrWaitTooLong}
 			return
 		}
 		time.Sleep(b.Duration())
