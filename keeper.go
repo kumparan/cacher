@@ -319,6 +319,7 @@ func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		var errs *multierror.Error
 		counter := 0
 		for {
 			select {
@@ -326,30 +327,25 @@ func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []
 				cachedItemsBuf[i.Key] = i.Item
 				counter++
 			case caseErr := <-errCh:
-				err = multierror.Append(err, caseErr)
+				err = multierror.Append(errs, caseErr)
 				counter++
 			case m := <-mutexCh:
 				mutexesBuf[m.Key] = m.Mutex
 				counter++
 			default:
 				if counter == len(keysToLock) {
+					err = errs.ErrorOrNil()
 					return
 				}
 			}
 		}
 	}()
-
 	wg.Wait()
-	if err != nil {
-		return
-	}
 
 	for _, k := range keys {
-		if v, ok := cachedItemsBuf[k]; ok {
-			cachedItems = append(cachedItems, v)
-		} else if m, ok := mutexesBuf[k]; ok {
+		cachedItems = append(cachedItems, cachedItemsBuf[k])
+		if m, ok := mutexesBuf[k]; ok {
 			mutexes = append(mutexes, m)
-			cachedItems = append(cachedItems, nil)
 		}
 	}
 
