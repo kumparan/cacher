@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
+
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
 	"github.com/kumparan/redsync/v4"
@@ -276,7 +278,7 @@ func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []
 		_ = c.Close()
 	}()
 
-	err = sendMultipleGetCommand(c, keys)
+	err = sendMultipleGetCommands(c, keys)
 	if err != nil {
 		return
 	}
@@ -304,9 +306,9 @@ func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []
 	}
 
 	var (
-		itemCh  = make(chan *itemWithKey)
+		itemCh  = make(chan itemWithKey)
 		errCh   = make(chan error)
-		mutexCh = make(chan *mutexWithKey)
+		mutexCh = make(chan mutexWithKey)
 	)
 
 	for _, key := range keysToLock {
@@ -323,8 +325,9 @@ func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []
 			case i := <-itemCh:
 				cachedItemsBuf[i.Key] = i.Item
 				counter++
-			case err = <-errCh:
-				return
+			case caseErr := <-errCh:
+				err = multierror.Append(err, caseErr)
+				counter++
 			case m := <-mutexCh:
 				mutexesBuf[m.Key] = m.Mutex
 				counter++
@@ -353,10 +356,10 @@ func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []
 	return
 }
 
-func (k *keeper) acquireLockOrGetValueThroughChan(key string, mutexCh chan<- *mutexWithKey, itemCh chan<- *itemWithKey, errCh chan<- error) {
+func (k *keeper) acquireLockOrGetValueThroughChan(key string, mutexCh chan<- mutexWithKey, itemCh chan<- itemWithKey, errCh chan<- error) {
 	mutex, err := k.AcquireLock(key)
 	if err == nil {
-		mutexCh <- &mutexWithKey{Mutex: mutex, Key: key}
+		mutexCh <- mutexWithKey{Mutex: mutex, Key: key}
 		return
 	}
 	start := time.Now()
@@ -373,7 +376,7 @@ func (k *keeper) acquireLockOrGetValueThroughChan(key string, mutexCh chan<- *mu
 				if err == ErrKeyNotExist {
 					mutex, err = k.AcquireLock(key)
 					if err == nil {
-						mutexCh <- &mutexWithKey{Mutex: mutex, Key: key}
+						mutexCh <- mutexWithKey{Mutex: mutex, Key: key}
 						return
 					}
 					goto Wait
@@ -381,7 +384,7 @@ func (k *keeper) acquireLockOrGetValueThroughChan(key string, mutexCh chan<- *mu
 				errCh <- err
 				return
 			}
-			itemCh <- &itemWithKey{Item: cachedItem, Key: key}
+			itemCh <- itemWithKey{Item: cachedItem, Key: key}
 			return
 		}
 
@@ -1018,7 +1021,7 @@ func (k *keeper) isLocked(key string) bool {
 	return true
 }
 
-func sendMultipleGetCommand(c redigo.Conn, keys []string) (err error) {
+func sendMultipleGetCommands(c redigo.Conn, keys []string) (err error) {
 	for _, key := range keys {
 		err = c.Send("GET", key)
 		if err != nil {
