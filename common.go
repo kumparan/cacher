@@ -8,9 +8,11 @@ import (
 )
 
 // SafeUnlock safely unlock mutex
-func SafeUnlock(mutex *redsync.Mutex) {
-	if mutex != nil {
-		_, _ = mutex.Unlock()
+func SafeUnlock(mutex ...*redsync.Mutex) {
+	for _, m := range mutex {
+		if m != nil {
+			_, _ = m.Unlock()
+		}
 	}
 }
 

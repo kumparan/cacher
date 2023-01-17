@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	redigo "github.com/gomodule/redigo/redis"
@@ -32,6 +33,7 @@ type (
 		Get(key string) (any, error)
 		GetOrLock(key string) (any, *redsync.Mutex, error)
 		GetOrSet(key string, fn GetterFn, opts ...func(Item)) ([]byte, error)
+		GetMultipleOrLock(keys []string) ([]any, []*redsync.Mutex, error)
 		Store(*redsync.Mutex, Item) error
 		StoreWithoutBlocking(Item) error
 		StoreMultiWithoutBlocking([]Item) error
@@ -87,6 +89,16 @@ type (
 		lockConnPool *redigo.Pool
 		lockDuration time.Duration
 		lockTries    int
+	}
+
+	itemWithKey struct {
+		Key  string
+		Item any
+	}
+
+	mutexWithKey struct {
+		Key   string
+		Mutex *redsync.Mutex
 	}
 )
 
@@ -249,6 +261,138 @@ func (k *keeper) GetOrSet(key string, fn GetterFn, opts ...func(Item)) (res []by
 	}
 	_ = k.Store(mu, cacheItem)
 	return cachedValue.([]byte), nil
+}
+
+// GetMultipleOrLock get multiple and apply locks for non-existing keys on redis.
+// Returned cached items will be in order based on keys provided, if the value for some key is not exist then it will be marked as nil on
+// returned cached items slice.
+func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []*redsync.Mutex, err error) {
+	if k.disableCaching {
+		return
+	}
+
+	c := k.connPool.Get()
+	defer func() {
+		_ = c.Close()
+	}()
+
+	err = sendMultipleGetCommand(c, keys)
+	if err != nil {
+		return
+	}
+
+	err = c.Flush()
+	if err != nil {
+		return
+	}
+
+	var (
+		keysToLock     []string
+		cachedItemsBuf = make(map[string]any)
+		mutexesBuf     = make(map[string]*redsync.Mutex)
+	)
+	for _, k := range keys {
+		rep, err := redigo.Bytes(c.Receive())
+		if err != nil && err != redigo.ErrNil {
+			return nil, nil, err
+		}
+		if rep == nil {
+			keysToLock = append(keysToLock, k)
+			continue
+		}
+		cachedItemsBuf[k] = rep
+	}
+
+	var (
+		itemCh  = make(chan *itemWithKey)
+		errCh   = make(chan error)
+		mutexCh = make(chan *mutexWithKey)
+	)
+
+	for _, key := range keysToLock {
+		go k.acquireLockOrGetValueThroughChan(key, mutexCh, itemCh, errCh)
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		counter := 0
+		for {
+			select {
+			case i := <-itemCh:
+				cachedItemsBuf[i.Key] = i.Item
+				counter++
+			case err = <-errCh:
+				return
+			case m := <-mutexCh:
+				mutexesBuf[m.Key] = m.Mutex
+				counter++
+			default:
+				if counter == len(keysToLock) {
+					return
+				}
+			}
+		}
+	}()
+
+	wg.Wait()
+	if err != nil {
+		return
+	}
+
+	for _, k := range keys {
+		if v, ok := cachedItemsBuf[k]; ok {
+			cachedItems = append(cachedItems, v)
+		} else if m, ok := mutexesBuf[k]; ok {
+			mutexes = append(mutexes, m)
+			cachedItems = append(cachedItems, nil)
+		}
+	}
+
+	return
+}
+
+func (k *keeper) acquireLockOrGetValueThroughChan(key string, mutexCh chan<- *mutexWithKey, itemCh chan<- *itemWithKey, errCh chan<- error) {
+	mutex, err := k.AcquireLock(key)
+	if err == nil {
+		mutexCh <- &mutexWithKey{Mutex: mutex, Key: key}
+		return
+	}
+	start := time.Now()
+	for {
+		b := &backoff.Backoff{
+			Jitter: true,
+			Min:    20 * time.Millisecond,
+			Max:    200 * time.Millisecond,
+		}
+
+		if !k.isLocked(key) {
+			cachedItem, err := get(k.connPool.Get(), key)
+			if err != nil {
+				if err == ErrKeyNotExist {
+					mutex, err = k.AcquireLock(key)
+					if err == nil {
+						mutexCh <- &mutexWithKey{Mutex: mutex, Key: key}
+						return
+					}
+					goto Wait
+				}
+				errCh <- err
+				return
+			}
+			itemCh <- &itemWithKey{Item: cachedItem, Key: key}
+			return
+		}
+
+	Wait:
+		elapsed := time.Since(start)
+		if elapsed >= k.waitTime {
+			errCh <- ErrWaitTooLong
+			return
+		}
+		time.Sleep(b.Duration())
+	}
 }
 
 // Store :nodoc:
@@ -872,4 +1016,14 @@ func (k *keeper) isLocked(key string) bool {
 	}
 
 	return true
+}
+
+func sendMultipleGetCommand(c redigo.Conn, keys []string) (err error) {
+	for _, key := range keys {
+		err = c.Send("GET", key)
+		if err != nil {
+			return
+		}
+	}
+	return nil
 }
