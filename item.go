@@ -1,6 +1,7 @@
 package cacher
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -9,14 +10,16 @@ type (
 	Item interface {
 		GetTTLInt64() int64
 		GetKey() string
+		GetKeyCounterName() string
 		GetValue() any
 		SetTTL(ttl time.Duration)
 	}
 
 	item struct {
-		key   string
-		value any
-		ttl   time.Duration
+		key            string
+		keyCounterName string
+		value          any
+		ttl            time.Duration
 	}
 )
 
@@ -57,6 +60,10 @@ func (i *item) SetTTL(ttl time.Duration) {
 // GetKey :nodoc:
 func (i *item) GetKey() string {
 	return i.key
+}
+
+func (i *item) GetKeyCounterName() string {
+	return fmt.Sprintf("%s:cache:hit:counter", i.key)
 }
 
 // GetValue :nodoc:

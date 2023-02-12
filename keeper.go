@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
 	"github.com/kumparan/redsync/v4"
@@ -15,6 +17,7 @@ import (
 const (
 	// Override these when constructing the cache keeper
 	defaultTTL          = 10 * time.Second
+	defaultDynamicTTL   = 5 * time.Minute
 	defaultNilTTL       = 5 * time.Minute
 	defaultLockDuration = 1 * time.Minute
 	defaultLockTries    = 1
@@ -45,6 +48,7 @@ type (
 
 		AcquireLock(string) (*redsync.Mutex, error)
 		SetDefaultTTL(time.Duration)
+		SetDefaultDynamicTTL(time.Duration)
 		SetNilTTL(time.Duration)
 		SetConnectionPool(*redigo.Pool)
 		SetLockConnectionPool(*redigo.Pool)
@@ -78,11 +82,12 @@ type (
 	}
 
 	keeper struct {
-		connPool       *redigo.Pool
-		nilTTL         time.Duration
-		defaultTTL     time.Duration
-		waitTime       time.Duration
-		disableCaching bool
+		connPool          *redigo.Pool
+		nilTTL            time.Duration
+		defaultTTL        time.Duration
+		defaultDynamicTTL time.Duration
+		waitTime          time.Duration
+		disableCaching    bool
 
 		lockConnPool *redigo.Pool
 		lockDuration time.Duration
@@ -93,18 +98,24 @@ type (
 // NewKeeper :nodoc:
 func NewKeeper() Keeper {
 	return &keeper{
-		defaultTTL:     defaultTTL,
-		nilTTL:         defaultNilTTL,
-		lockDuration:   defaultLockDuration,
-		lockTries:      defaultLockTries,
-		waitTime:       defaultWaitTime,
-		disableCaching: false,
+		defaultTTL:        defaultTTL,
+		defaultDynamicTTL: defaultDynamicTTL,
+		nilTTL:            defaultNilTTL,
+		lockDuration:      defaultLockDuration,
+		lockTries:         defaultLockTries,
+		waitTime:          defaultWaitTime,
+		disableCaching:    false,
 	}
 }
 
 // SetDefaultTTL :nodoc:
 func (k *keeper) SetDefaultTTL(d time.Duration) {
 	k.defaultTTL = d
+}
+
+// SetDefaultDynamicTTL :nodoc:
+func (k *keeper) SetDefaultDynamicTTL(d time.Duration) {
+	k.defaultDynamicTTL = d
 }
 
 func (k *keeper) SetNilTTL(d time.Duration) {
@@ -147,9 +158,15 @@ func (k *keeper) Get(key string) (cachedItem any, err error) {
 		return
 	}
 
-	cachedItem, err = get(k.connPool.Get(), key)
-	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
-		return
+	cachedItem, ttl, err := get(k.connPool.Get(), key)
+	switch err {
+	case nil, ErrKeyNotExist, redigo.ErrNil:
+	default:
+		return nil, err
+	}
+	if cachedItem != nil {
+		go k.increaseDynamicCacheCounter(key, ttl)
+		return cachedItem, nil
 	}
 
 	return nil, nil
@@ -161,8 +178,8 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 		return
 	}
 
-	cachedItem, err = get(k.connPool.Get(), key)
-	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
+	cachedItem, err = k.Get(key)
+	if err != nil || cachedItem != nil {
 		return
 	}
 
@@ -180,7 +197,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 		}
 
 		if !k.isLocked(key) {
-			cachedItem, err = get(k.connPool.Get(), key)
+			cachedItem, ttlValue, err := get(k.connPool.Get(), key)
 			if err != nil {
 				if err == ErrKeyNotExist {
 					mutex, err = k.AcquireLock(key)
@@ -192,6 +209,8 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 				}
 				return nil, nil, err
 			}
+			// cache exists, increment the cache counter
+			go k.increaseDynamicCacheCounter(key, ttlValue)
 			return cachedItem, nil, nil
 		}
 
@@ -258,13 +277,7 @@ func (k *keeper) Store(mutex *redsync.Mutex, c Item) error {
 	}
 	defer SafeUnlock(mutex)
 
-	client := k.connPool.Get()
-	defer func() {
-		_ = client.Close()
-	}()
-
-	_, err := client.Do("SETEX", c.GetKey(), k.decideCacheTTL(c), c.GetValue())
-	return err
+	return k.StoreWithoutBlocking(c)
 }
 
 // StoreWithoutBlocking :nodoc:
@@ -278,7 +291,22 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 		_ = client.Close()
 	}()
 
-	_, err := client.Do("SETEX", c.GetKey(), k.decideCacheTTL(c), c.GetValue())
+	err := client.Send("MULTI")
+	if err != nil {
+		return err
+	}
+
+	err = client.Send("SETEX", c.GetKey(), k.decideCacheTTL(c), c.GetValue())
+	if err != nil {
+		return err
+	}
+
+	// set counter cache to 0 with the same TTL as the main cache key
+	err = client.Send("SETEX", c.GetKeyCounterName(), k.decideCacheTTL(c), 0)
+	if err != nil {
+		return err
+	}
+	_, err = client.Do("EXEC")
 	return err
 }
 
@@ -340,7 +368,7 @@ func (k *keeper) Purge(matchString string) error {
 	return nil
 }
 
-// IncreaseCachedValueByOne will increments the number stored at key by one.
+// IncreaseCachedValueByOne will increment the number stored at key by one.
 // If the key does not exist, it is set to 0 before performing the operation
 func (k *keeper) IncreaseCachedValueByOne(key string) error {
 	if k.disableCaching {
@@ -384,7 +412,7 @@ func (k *keeper) DeleteByKeys(keys []string) error {
 
 	var redisKeys []any
 	for _, key := range keys {
-		redisKeys = append(redisKeys, key)
+		redisKeys = append(redisKeys, key, getCounterKey(key))
 	}
 
 	_, err := client.Do("DEL", redisKeys...)
@@ -860,6 +888,63 @@ func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
 	return int64(k.defaultTTL.Seconds())
 }
 
+func (k *keeper) decideDynamicCacheTTL(c Item) (ttl int64) {
+	// counter cache key is using the same TTL as its main key
+	if ttl = c.GetTTLInt64(); ttl > 0 {
+		return
+	}
+
+	return int64(k.defaultDynamicTTL.Seconds())
+}
+
+func (k *keeper) increaseDynamicCacheCounter(key string, ttl int64) {
+	counterKey := getCounterKey(key)
+	client := k.connPool.Get()
+	defer func() {
+		_ = client.Close()
+	}()
+
+	res, err := client.Do("INCR", counterKey)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	counterValue, ok := res.(int64)
+	if !ok || counterValue <= 0 {
+		return
+	}
+
+	// only increase TTL if the counter reach multiplies of 10
+	if counterValue%10 != 0 {
+		return
+	}
+
+	// increment key by one
+	// if counter hits mod 10, increase the ttl
+	newTTL := ttl * 2
+	err = client.Send("MULTI")
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	err = client.Send("EXPIRE", key, newTTL)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	err = client.Send("EXPIRE", counterKey, newTTL)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+
+	_, err = client.Do("EXEC")
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+}
+
 func (k *keeper) isLocked(key string) bool {
 	client := k.lockConnPool.Get()
 	defer func() {
@@ -872,4 +957,8 @@ func (k *keeper) isLocked(key string) bool {
 	}
 
 	return true
+}
+
+func getCounterKey(mainKey string) string {
+	return fmt.Sprintf("%s:cache:hit:counter", mainKey)
 }

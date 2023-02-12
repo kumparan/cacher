@@ -25,12 +25,13 @@ type KeeperWithFailover struct {
 func NewKeeperWithFailover() *KeeperWithFailover {
 	return &KeeperWithFailover{
 		keeper: keeper{
-			defaultTTL:     defaultTTL,
-			nilTTL:         defaultNilTTL,
-			lockDuration:   defaultLockDuration,
-			lockTries:      defaultLockTries,
-			waitTime:       defaultWaitTime,
-			disableCaching: false,
+			defaultTTL:        defaultTTL,
+			defaultDynamicTTL: defaultDynamicTTL,
+			nilTTL:            defaultNilTTL,
+			lockDuration:      defaultLockDuration,
+			lockTries:         defaultLockTries,
+			waitTime:          defaultWaitTime,
+			disableCaching:    false,
 		},
 		failoverTTL: defaultFailoverTTL,
 	}
@@ -103,9 +104,15 @@ func (k *KeeperWithFailover) GetFailover(key string) (cachedItem any, err error)
 		return
 	}
 
-	cachedItem, err = get(k.failoverConnPool.Get(), key)
-	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
-		return
+	cachedItem, ttl, err := get(k.failoverConnPool.Get(), key)
+	switch err {
+	case nil, ErrKeyNotExist, redigo.ErrNil:
+	default:
+		return nil, err
+	}
+	if cachedItem != nil {
+		go k.increaseDynamicCacheCounter(key, ttl)
+		return cachedItem, nil
 	}
 
 	return nil, nil
@@ -121,7 +128,23 @@ func (k *KeeperWithFailover) StoreFailover(c Item) error {
 	defer func() {
 		_ = client.Close()
 	}()
-	_, err := client.Do("SETEX", c.GetKey(), k.failoverTTL.Seconds(), c.GetValue())
+
+	err := client.Send("MULTI")
+	if err != nil {
+		return err
+	}
+
+	err = client.Send("SETEX", c.GetKey(), k.failoverTTL.Seconds(), c.GetValue())
+	if err != nil {
+		return err
+	}
+
+	// set counter cache to 0 with the same TTL as the main cache key
+	err = client.Send("SETEX", c.GetKeyCounterName(), k.failoverTTL.Seconds(), 0)
+	if err != nil {
+		return err
+	}
+	_, err = client.Do("EXEC")
 	return err
 }
 
