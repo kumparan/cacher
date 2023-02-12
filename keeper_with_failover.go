@@ -32,6 +32,7 @@ func NewKeeperWithFailover() *KeeperWithFailover {
 			lockTries:         defaultLockTries,
 			waitTime:          defaultWaitTime,
 			disableCaching:    false,
+			enableDynamicTTL:  false,
 		},
 		failoverTTL: defaultFailoverTTL,
 	}
@@ -111,7 +112,9 @@ func (k *KeeperWithFailover) GetFailover(key string) (cachedItem any, err error)
 		return nil, err
 	}
 	if cachedItem != nil {
-		go k.increaseDynamicCacheCounter(key, ttl)
+		if k.enableDynamicTTL {
+			go k.increaseDynamicCacheCounter(key, ttl)
+		}
 		return cachedItem, nil
 	}
 
@@ -139,10 +142,12 @@ func (k *KeeperWithFailover) StoreFailover(c Item) error {
 		return err
 	}
 
-	// set counter cache to 0 with the same TTL as the main cache key
-	err = client.Send("SETEX", c.GetKeyCounterName(), k.failoverTTL.Seconds(), 0)
-	if err != nil {
-		return err
+	if k.enableDynamicTTL {
+		// set counter cache to 0 with the same TTL as the main cache key
+		err = client.Send("SETEX", c.GetKeyCounterName(), k.failoverTTL.Seconds(), 0)
+		if err != nil {
+			return err
+		}
 	}
 	_, err = client.Do("EXEC")
 	return err

@@ -16,10 +16,9 @@ type (
 	}
 
 	item struct {
-		key            string
-		keyCounterName string
-		value          any
-		ttl            time.Duration
+		key   string
+		value any
+		ttl   time.Duration
 	}
 )
 

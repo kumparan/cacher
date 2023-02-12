@@ -56,6 +56,7 @@ type (
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
 		SetDisableCaching(bool)
+		SetEnableDynamicTTL(bool)
 
 		CheckKeyExist(string) (bool, error)
 
@@ -88,6 +89,7 @@ type (
 		defaultDynamicTTL time.Duration
 		waitTime          time.Duration
 		disableCaching    bool
+		enableDynamicTTL  bool
 
 		lockConnPool *redigo.Pool
 		lockDuration time.Duration
@@ -105,6 +107,7 @@ func NewKeeper() Keeper {
 		lockTries:         defaultLockTries,
 		waitTime:          defaultWaitTime,
 		disableCaching:    false,
+		enableDynamicTTL:  false,
 	}
 }
 
@@ -152,6 +155,11 @@ func (k *keeper) SetDisableCaching(b bool) {
 	k.disableCaching = b
 }
 
+// SetEnableDynamicTTL :nodoc:
+func (k *keeper) SetEnableDynamicTTL(b bool) {
+	k.enableDynamicTTL = b
+}
+
 // Get :nodoc:
 func (k *keeper) Get(key string) (cachedItem any, err error) {
 	if k.disableCaching {
@@ -165,7 +173,9 @@ func (k *keeper) Get(key string) (cachedItem any, err error) {
 		return nil, err
 	}
 	if cachedItem != nil {
-		go k.increaseDynamicCacheCounter(key, ttl)
+		if k.enableDynamicTTL {
+			go k.increaseDynamicCacheCounter(key, ttl)
+		}
 		return cachedItem, nil
 	}
 
@@ -209,8 +219,10 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 				}
 				return nil, nil, err
 			}
-			// cache exists, increment the cache counter
-			go k.increaseDynamicCacheCounter(key, ttlValue)
+			if k.enableDynamicTTL {
+				// cache exists, increment the cache counter
+				go k.increaseDynamicCacheCounter(key, ttlValue)
+			}
 			return cachedItem, nil, nil
 		}
 
@@ -301,11 +313,14 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 		return err
 	}
 
-	// set counter cache to 0 with the same TTL as the main cache key
-	err = client.Send("SETEX", c.GetKeyCounterName(), k.decideCacheTTL(c), 0)
-	if err != nil {
-		return err
+	if k.enableDynamicTTL {
+		// set counter cache to 0 with the same TTL as the main cache key
+		err = client.Send("SETEX", c.GetKeyCounterName(), k.decideCacheTTL(c), 0)
+		if err != nil {
+			return err
+		}
 	}
+
 	_, err = client.Do("EXEC")
 	return err
 }
@@ -886,15 +901,6 @@ func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
 	}
 
 	return int64(k.defaultTTL.Seconds())
-}
-
-func (k *keeper) decideDynamicCacheTTL(c Item) (ttl int64) {
-	// counter cache key is using the same TTL as its main key
-	if ttl = c.GetTTLInt64(); ttl > 0 {
-		return
-	}
-
-	return int64(k.defaultDynamicTTL.Seconds())
 }
 
 func (k *keeper) increaseDynamicCacheCounter(key string, ttl int64) {
