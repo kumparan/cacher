@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -921,7 +922,7 @@ func (k *keeper) increaseDynamicCacheCounter(key string, ttl int64) {
 	}
 
 	// only increase TTL if the counter reach multiplies of 10
-	if counterValue%10 != 0 {
+	if math.Mod(float64(counterValue), 10) != 0 {
 		return
 	}
 

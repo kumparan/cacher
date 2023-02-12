@@ -15,5 +15,7 @@ check-cognitive-complexity:
 lint: check-cognitive-complexity
 	golangci-lint run --print-issued-lines=false --exclude-use-default=false --enable=revive --enable=goimports  --enable=unconvert --concurrency=2
 
-test: lint
+test: lint test-only
+
+test-only:
 	$(test_command)
