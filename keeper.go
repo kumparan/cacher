@@ -17,12 +17,13 @@ import (
 
 const (
 	// Override these when constructing the cache keeper
-	defaultTTL          = 10 * time.Second
-	defaultDynamicTTL   = 5 * time.Minute
-	defaultNilTTL       = 5 * time.Minute
-	defaultLockDuration = 1 * time.Minute
-	defaultLockTries    = 1
-	defaultWaitTime     = 15 * time.Second
+	defaultTTL             = 10 * time.Second
+	defaultDynamicTTL      = 5 * time.Minute
+	defaultNilTTL          = 5 * time.Minute
+	defaultLockDuration    = 1 * time.Minute
+	defaultLockTries       = 1
+	defaultCacheMultiplier = 10
+	defaultWaitTime        = 15 * time.Second
 )
 
 var nilValue = []byte("null")
@@ -58,6 +59,7 @@ type (
 		SetWaitTime(time.Duration)
 		SetDisableCaching(bool)
 		SetEnableDynamicTTL(bool)
+		SetCacheMultiplier(int)
 
 		CheckKeyExist(string) (bool, error)
 
@@ -92,9 +94,10 @@ type (
 		disableCaching    bool
 		enableDynamicTTL  bool
 
-		lockConnPool *redigo.Pool
-		lockDuration time.Duration
-		lockTries    int
+		lockConnPool    *redigo.Pool
+		lockDuration    time.Duration
+		lockTries       int
+		cacheMultiplier int
 	}
 )
 
@@ -109,6 +112,7 @@ func NewKeeper() Keeper {
 		waitTime:          defaultWaitTime,
 		disableCaching:    false,
 		enableDynamicTTL:  false,
+		cacheMultiplier:   defaultCacheMultiplier,
 	}
 }
 
@@ -120,6 +124,11 @@ func (k *keeper) SetDefaultTTL(d time.Duration) {
 // SetDefaultDynamicTTL :nodoc:
 func (k *keeper) SetDefaultDynamicTTL(d time.Duration) {
 	k.defaultDynamicTTL = d
+}
+
+// SetCacheMultiplier :nodoc:
+func (k *keeper) SetCacheMultiplier(d int) {
+	k.cacheMultiplier = d
 }
 
 func (k *keeper) SetNilTTL(d time.Duration) {
@@ -922,7 +931,7 @@ func (k *keeper) increaseDynamicCacheCounter(key string, ttl int64) {
 	}
 
 	// only increase TTL if the counter reach multiplies of 10
-	if math.Mod(float64(counterValue), 10) != 0 {
+	if math.Mod(float64(counterValue), float64(k.cacheMultiplier)) != 0 {
 		return
 	}
 
