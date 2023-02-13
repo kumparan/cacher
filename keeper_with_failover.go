@@ -26,7 +26,6 @@ func NewKeeperWithFailover() *KeeperWithFailover {
 	return &KeeperWithFailover{
 		keeper: keeper{
 			defaultTTL:           defaultTTL,
-			dynamicTTL:           defaultDynamicTTL,
 			nilTTL:               defaultNilTTL,
 			lockDuration:         defaultLockDuration,
 			lockTries:            defaultLockTries,
@@ -36,6 +35,7 @@ func NewKeeperWithFailover() *KeeperWithFailover {
 			cacheThreshold:       defaultCacheThreshold,
 			maxCacheTTL:          defaultMaxCacheTTL,
 			minCacheTTLThreshold: defaultMinCacheTTLThreshold,
+			multiplierFactor:     defaultMultiplierFactor,
 		},
 		failoverTTL: defaultFailoverTTL,
 	}

@@ -17,14 +17,14 @@ import (
 const (
 	// Override these when constructing the cache keeper
 	defaultTTL                  = 10 * time.Second
-	defaultDynamicTTL           = 5 * time.Minute
 	defaultNilTTL               = 5 * time.Minute
 	defaultLockDuration         = 1 * time.Minute
-	defaultLockTries            = 1
-	defaultCacheThreshold       = 10
 	defaultWaitTime             = 15 * time.Second
 	defaultMaxCacheTTL          = 48 * time.Hour
 	defaultMinCacheTTLThreshold = 10 * time.Second
+	defaultLockTries            = 1
+	defaultCacheThreshold       = 10
+	defaultMultiplierFactor     = 2
 )
 
 var nilValue = []byte("null")
@@ -51,7 +51,6 @@ type (
 
 		AcquireLock(string) (*redsync.Mutex, error)
 		SetDefaultTTL(time.Duration)
-		SetDefaultDynamicTTL(time.Duration)
 		SetNilTTL(time.Duration)
 		SetConnectionPool(*redigo.Pool)
 		SetLockConnectionPool(*redigo.Pool)
@@ -60,9 +59,10 @@ type (
 		SetWaitTime(time.Duration)
 		SetDisableCaching(bool)
 		SetEnableDynamicTTL(bool)
-		SetCacheThreshold(int64)
 		SetMaxCacheTTL(time.Duration)
 		SetMinCacheTTLThreshold(time.Duration)
+		SetCacheThreshold(int64)
+		SetMultiplierFactor(int64)
 
 		CheckKeyExist(string) (bool, error)
 
@@ -92,12 +92,12 @@ type (
 		connPool             *redigo.Pool
 		nilTTL               time.Duration
 		defaultTTL           time.Duration
-		dynamicTTL           time.Duration
 		waitTime             time.Duration
 		maxCacheTTL          time.Duration
 		minCacheTTLThreshold time.Duration
 		disableCaching       bool
 		enableDynamicTTL     bool
+		multiplierFactor     int64
 
 		lockConnPool   *redigo.Pool
 		lockDuration   time.Duration
@@ -110,7 +110,6 @@ type (
 func NewKeeper() Keeper {
 	return &keeper{
 		defaultTTL:           defaultTTL,
-		dynamicTTL:           defaultDynamicTTL,
 		nilTTL:               defaultNilTTL,
 		lockDuration:         defaultLockDuration,
 		lockTries:            defaultLockTries,
@@ -120,6 +119,7 @@ func NewKeeper() Keeper {
 		cacheThreshold:       defaultCacheThreshold,
 		maxCacheTTL:          defaultMaxCacheTTL,
 		minCacheTTLThreshold: defaultMinCacheTTLThreshold,
+		multiplierFactor:     defaultMultiplierFactor,
 	}
 }
 
@@ -128,9 +128,9 @@ func (k *keeper) SetDefaultTTL(d time.Duration) {
 	k.defaultTTL = d
 }
 
-// SetDefaultDynamicTTL :nodoc:
-func (k *keeper) SetDefaultDynamicTTL(d time.Duration) {
-	k.dynamicTTL = d
+// SetMultiplierFactor :nodoc:
+func (k *keeper) SetMultiplierFactor(d int64) {
+	k.multiplierFactor = d
 }
 
 // SetMaxCacheTTL :nodoc:
@@ -960,7 +960,7 @@ func (k *keeper) increaseCacheCounterAndExtendCacheTTL(key string, ttl int64) {
 		return
 	}
 
-	newTTL := ttl * 2
+	newTTL := ttl * k.multiplierFactor
 	if newTTL > int64(k.maxCacheTTL) {
 		newTTL = int64(k.maxCacheTTL)
 	}
