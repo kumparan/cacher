@@ -24,6 +24,7 @@ const (
 	defaultLockTries       = 1
 	defaultCacheMultiplier = 10
 	defaultWaitTime        = 15 * time.Second
+	maxCacheValue          = 48 * time.Hour
 )
 
 var nilValue = []byte("null")
@@ -913,6 +914,8 @@ func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
 	return int64(k.defaultTTL.Seconds())
 }
 
+// increaseDynamicCacheCounter will increase cache based on traffic
+// will not return error as this should not disturb the main operation
 func (k *keeper) increaseDynamicCacheCounter(key string, ttl int64) {
 	counterKey := getCounterKey(key)
 	client := k.connPool.Get()
@@ -936,8 +939,7 @@ func (k *keeper) increaseDynamicCacheCounter(key string, ttl int64) {
 	}
 
 	// increment key by one
-	// if counter hits mod 10, increase the ttl
-	newTTL := ttl * 2
+	newTTL := math.Max(float64(ttl*2), maxCacheValue.Seconds())
 	err = client.Send("MULTI")
 	if err != nil {
 		logrus.Error(err)
@@ -948,7 +950,7 @@ func (k *keeper) increaseDynamicCacheCounter(key string, ttl int64) {
 		logrus.Error(err)
 		return
 	}
-	err = client.Send("EXPIRE", counterKey, newTTL)
+	err = client.Send("EXPIRE", counterKey, newTTL, "GT")
 	if err != nil {
 		logrus.Error(err)
 		return
