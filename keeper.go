@@ -947,7 +947,7 @@ func (k *keeper) increaseDynamicCacheCounter(key string, ttl int64) {
 		logrus.Error(err)
 		return
 	}
-	err = client.Send("EXPIRE", key, newTTL)
+	err = client.Send("EXPIRE", key, newTTL, "GT")
 	if err != nil {
 		logrus.Error(err)
 		return
