@@ -25,14 +25,17 @@ type KeeperWithFailover struct {
 func NewKeeperWithFailover() *KeeperWithFailover {
 	return &KeeperWithFailover{
 		keeper: keeper{
-			defaultTTL:        defaultTTL,
-			defaultDynamicTTL: defaultDynamicTTL,
-			nilTTL:            defaultNilTTL,
-			lockDuration:      defaultLockDuration,
-			lockTries:         defaultLockTries,
-			waitTime:          defaultWaitTime,
-			disableCaching:    false,
-			enableDynamicTTL:  false,
+			defaultTTL:           defaultTTL,
+			dynamicTTL:           defaultDynamicTTL,
+			nilTTL:               defaultNilTTL,
+			lockDuration:         defaultLockDuration,
+			lockTries:            defaultLockTries,
+			waitTime:             defaultWaitTime,
+			disableCaching:       false,
+			enableDynamicTTL:     false,
+			cacheThreshold:       defaultCacheThreshold,
+			maxCacheTTL:          defaultMaxCacheTTL,
+			minCacheTTLThreshold: defaultMinCacheTTLThreshold,
 		},
 		failoverTTL: defaultFailoverTTL,
 	}
@@ -113,7 +116,7 @@ func (k *KeeperWithFailover) GetFailover(key string) (cachedItem any, err error)
 	}
 	if cachedItem != nil {
 		if k.enableDynamicTTL {
-			go k.increaseDynamicCacheCounter(key, ttl)
+			k.increaseCacheCounterAndExtendCacheTTL(key, ttl)
 		}
 		return cachedItem, nil
 	}
@@ -144,7 +147,7 @@ func (k *KeeperWithFailover) StoreFailover(c Item) error {
 
 	if k.enableDynamicTTL {
 		// set counter cache to 0 with the same TTL as the main cache key
-		err = client.Send("SETEX", c.GetKeyCounterName(), k.failoverTTL.Seconds(), 0)
+		err = client.Send("SETEX", getCounterKey(c.GetKey()), k.failoverTTL.Seconds(), 0)
 		if err != nil {
 			return err
 		}

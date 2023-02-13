@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/stretchr/testify/require"
 
 	redigo "github.com/gomodule/redigo/redis"
@@ -101,6 +103,26 @@ func TestGet(t *testing.T) {
 		result, err := k.Get(testKey)
 		assert.NoError(t, err)
 		assert.EqualValues(t, result, val)
+	})
+
+	t.Run("Enable Dynamic TTL", func(t *testing.T) {
+		d := 20 * time.Minute
+		k.SetEnableDynamicTTL(true)
+		k.SetCacheThreshold(1)
+		val := "something-something-here"
+
+		_ = m.Set(testKey, val)
+		m.SetTTL(testKey, d)
+		result, err := k.Get(testKey)
+		assert.NoError(t, err)
+		assert.EqualValues(t, result, val)
+		assert.True(t, m.Exists(getCounterKey(testKey)))
+
+		// cache ttl should be longer
+		_, _ = k.Get(testKey)
+		newTTL := m.TTL(testKey)
+		logrus.Info(newTTL)
+		assert.True(t, newTTL > d)
 	})
 }
 
@@ -499,6 +521,40 @@ func TestStoreMultiWithoutBlocking(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, value, res)
 	}
+}
+
+func TestStore(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+	testKey := "test-key"
+
+	t.Run("disable dynamic cache", func(t *testing.T) {
+		val := "dis the value"
+		mu, err := k.AcquireLock(testKey)
+		assert.NoError(t, err)
+		err = k.Store(mu, NewItem(testKey, val))
+		assert.NoError(t, err)
+		assert.True(t, m.Exists(testKey))
+		assert.False(t, m.Exists(getCounterKey(testKey)))
+	})
+
+	t.Run("disable dynamic cache", func(t *testing.T) {
+		k.SetEnableDynamicTTL(true)
+		val := "dis the value"
+		mu, err := k.AcquireLock(testKey)
+		assert.NoError(t, err)
+		err = k.Store(mu, NewItem(testKey, val))
+		assert.NoError(t, err)
+		assert.True(t, m.Exists(testKey))
+		assert.True(t, m.Exists(getCounterKey(testKey)))
+	})
 }
 
 func TestStoreMultiPersist(t *testing.T) {
