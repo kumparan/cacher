@@ -939,7 +939,7 @@ func (k *keeper) increaseDynamicCacheCounter(key string, ttl int64) {
 	}
 
 	// increment key by one
-	newTTL := math.Max(float64(ttl*2), maxCacheValue.Seconds())
+	newTTL := math.Min(float64(ttl*2), maxCacheValue.Seconds())
 	err = client.Send("MULTI")
 	if err != nil {
 		logrus.Error(err)
