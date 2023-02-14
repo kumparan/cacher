@@ -32,7 +32,7 @@ func NewKeeperWithFailover() *KeeperWithFailover {
 			waitTime:             defaultWaitTime,
 			disableCaching:       false,
 			enableDynamicTTL:     false,
-			cacheThreshold:       defaultCacheThreshold,
+			cacheHitThreshold:    defaultCacheHitThreshold,
 			maxCacheTTL:          defaultMaxCacheTTL,
 			minCacheTTLThreshold: defaultMinCacheTTLThreshold,
 			multiplierFactor:     defaultMultiplierFactor,
@@ -116,7 +116,7 @@ func (k *KeeperWithFailover) GetFailover(key string) (cachedItem any, err error)
 	}
 	if cachedItem != nil {
 		if k.enableDynamicTTL {
-			k.increaseCacheCounterAndExtendCacheTTL(key, ttl)
+			k.extendCacheTTL(key, ttl)
 		}
 		return cachedItem, nil
 	}

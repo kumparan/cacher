@@ -21,9 +21,9 @@ const (
 	defaultLockDuration         = 1 * time.Minute
 	defaultWaitTime             = 15 * time.Second
 	defaultMaxCacheTTL          = 48 * time.Hour
-	defaultMinCacheTTLThreshold = 10 * time.Second
+	defaultMinCacheTTLThreshold = 5 * time.Second
 	defaultLockTries            = 1
-	defaultCacheThreshold       = 10
+	defaultCacheHitThreshold    = 10
 	defaultMultiplierFactor     = 2
 )
 
@@ -61,7 +61,7 @@ type (
 		SetEnableDynamicTTL(bool)
 		SetMaxCacheTTL(time.Duration)
 		SetMinCacheTTLThreshold(time.Duration)
-		SetCacheThreshold(int64)
+		SetCacheHitThreshold(int64)
 		SetMultiplierFactor(int64)
 
 		CheckKeyExist(string) (bool, error)
@@ -99,10 +99,10 @@ type (
 		enableDynamicTTL     bool
 		multiplierFactor     int64
 
-		lockConnPool   *redigo.Pool
-		lockDuration   time.Duration
-		lockTries      int
-		cacheThreshold int64
+		lockConnPool      *redigo.Pool
+		lockDuration      time.Duration
+		lockTries         int
+		cacheHitThreshold int64
 	}
 )
 
@@ -116,7 +116,7 @@ func NewKeeper() Keeper {
 		waitTime:             defaultWaitTime,
 		disableCaching:       false,
 		enableDynamicTTL:     false,
-		cacheThreshold:       defaultCacheThreshold,
+		cacheHitThreshold:    defaultCacheHitThreshold,
 		maxCacheTTL:          defaultMaxCacheTTL,
 		minCacheTTLThreshold: defaultMinCacheTTLThreshold,
 		multiplierFactor:     defaultMultiplierFactor,
@@ -133,19 +133,21 @@ func (k *keeper) SetMultiplierFactor(d int64) {
 	k.multiplierFactor = d
 }
 
-// SetMaxCacheTTL :nodoc:
+// SetMaxCacheTTL maximum TTL allowed after extended. Only being used if Dynamic Cache is enabled
 func (k *keeper) SetMaxCacheTTL(d time.Duration) {
 	k.maxCacheTTL = d
 }
 
-// SetMinCacheTTLThreshold :nodoc:
+// SetMinCacheTTLThreshold if current TTL is below this threshold, then the TTL won't be extended.
+// Only being used if Dynamic Cache is enabled
 func (k *keeper) SetMinCacheTTLThreshold(d time.Duration) {
 	k.maxCacheTTL = d
 }
 
-// SetCacheThreshold :nodoc:
-func (k *keeper) SetCacheThreshold(d int64) {
-	k.cacheThreshold = d
+// SetCacheHitThreshold is the threshold before the cache is extended. If the counter hasn't reached the threshold, it won't be extended.
+// Only being used if Dynamic Cache is enabled
+func (k *keeper) SetCacheHitThreshold(d int64) {
+	k.cacheHitThreshold = d
 }
 
 func (k *keeper) SetNilTTL(d time.Duration) {
@@ -201,7 +203,7 @@ func (k *keeper) Get(key string) (cachedItem any, err error) {
 	}
 	if cachedItem != nil {
 		if k.enableDynamicTTL {
-			k.increaseCacheCounterAndExtendCacheTTL(key, ttl)
+			k.extendCacheTTL(key, ttl)
 		}
 		return cachedItem, nil
 	}
@@ -247,8 +249,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 				return nil, nil, err
 			}
 			if k.enableDynamicTTL {
-				// cache exists, increment the cache counter
-				k.increaseCacheCounterAndExtendCacheTTL(key, ttlValue)
+				k.extendCacheTTL(key, ttlValue)
 			}
 			return cachedItem, nil, nil
 		}
@@ -930,10 +931,10 @@ func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
 	return int64(k.defaultTTL.Seconds())
 }
 
-// increaseCacheCounterAndExtendCacheTTL will increase cache based on traffic
+// extendCacheTTL will increase cache based on traffic
 // if the traffic reaches the threshold, it will extend the cache TTL
 // will not return error as this should not disturb the main operation
-func (k *keeper) increaseCacheCounterAndExtendCacheTTL(key string, ttl int64) {
+func (k *keeper) extendCacheTTL(key string, ttl int64) {
 	// if current TTL is below the minimum threshold, just ignore it
 	if ttl < int64(k.minCacheTTLThreshold.Seconds()) {
 		return
@@ -956,7 +957,7 @@ func (k *keeper) increaseCacheCounterAndExtendCacheTTL(key string, ttl int64) {
 	}
 
 	// only increase TTL if the counter reaches threshold
-	if counterValue%k.cacheThreshold != 0 {
+	if counterValue%k.cacheHitThreshold != 0 {
 		return
 	}
 

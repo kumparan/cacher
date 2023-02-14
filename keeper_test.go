@@ -108,7 +108,7 @@ func TestGet(t *testing.T) {
 	t.Run("Enable Dynamic TTL", func(t *testing.T) {
 		d := 20 * time.Minute
 		k.SetEnableDynamicTTL(true)
-		k.SetCacheThreshold(1)
+		k.SetCacheHitThreshold(1)
 		val := "something-something-here"
 
 		_ = m.Set(testKey, val)
