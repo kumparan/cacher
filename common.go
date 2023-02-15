@@ -45,34 +45,43 @@ func getOffset(page, limit int64) int64 {
 	return offset
 }
 
-func get(client redigo.Conn, key string) (value any, err error) {
+func get(client redigo.Conn, key string) (value any, ttlValue int64, err error) {
 	defer func() {
 		_ = client.Close()
 	}()
 
 	err = client.Send("MULTI")
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	err = client.Send("EXISTS", key)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	err = client.Send("GET", key)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	err = client.Send("TTL", key)
+	if err != nil {
+		return nil, 0, err
 	}
 	res, err := redigo.Values(client.Do("EXEC"))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	val, ok := res[0].(int64)
 	if !ok || val <= 0 {
-		return nil, ErrKeyNotExist
+		return nil, 0, ErrKeyNotExist
 	}
 
-	return res[1], nil
+	ttlValue, ok = res[2].(int64)
+	if !ok {
+		return nil, 0, ErrInvalidTTL
+	}
+
+	return res[1], ttlValue, nil
 }
 
 func getHashMember(client redigo.Conn, identifier, key string) (value any, err error) {

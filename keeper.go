@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
 	"github.com/kumparan/redsync/v4"
@@ -14,11 +16,15 @@ import (
 
 const (
 	// Override these when constructing the cache keeper
-	defaultTTL          = 10 * time.Second
-	defaultNilTTL       = 5 * time.Minute
-	defaultLockDuration = 1 * time.Minute
-	defaultLockTries    = 1
-	defaultWaitTime     = 15 * time.Second
+	defaultTTL                  = 10 * time.Second
+	defaultNilTTL               = 5 * time.Minute
+	defaultLockDuration         = 1 * time.Minute
+	defaultWaitTime             = 15 * time.Second
+	defaultMaxCacheTTL          = 48 * time.Hour
+	defaultMinCacheTTLThreshold = 5 * time.Second
+	defaultLockTries            = 1
+	defaultCacheHitThreshold    = 10
+	defaultMultiplierFactor     = 2
 )
 
 var nilValue = []byte("null")
@@ -52,6 +58,11 @@ type (
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
 		SetDisableCaching(bool)
+		SetEnableDynamicTTL(bool)
+		SetMaxCacheTTL(time.Duration)
+		SetMinCacheTTLThreshold(time.Duration)
+		SetCacheHitThreshold(int64)
+		SetMultiplierFactor(int64)
 
 		CheckKeyExist(string) (bool, error)
 
@@ -78,33 +89,65 @@ type (
 	}
 
 	keeper struct {
-		connPool       *redigo.Pool
-		nilTTL         time.Duration
-		defaultTTL     time.Duration
-		waitTime       time.Duration
-		disableCaching bool
+		connPool             *redigo.Pool
+		nilTTL               time.Duration
+		defaultTTL           time.Duration
+		waitTime             time.Duration
+		maxCacheTTL          time.Duration
+		minCacheTTLThreshold time.Duration
+		disableCaching       bool
+		enableDynamicTTL     bool
+		multiplierFactor     int64
 
-		lockConnPool *redigo.Pool
-		lockDuration time.Duration
-		lockTries    int
+		lockConnPool      *redigo.Pool
+		lockDuration      time.Duration
+		lockTries         int
+		cacheHitThreshold int64
 	}
 )
 
 // NewKeeper :nodoc:
 func NewKeeper() Keeper {
 	return &keeper{
-		defaultTTL:     defaultTTL,
-		nilTTL:         defaultNilTTL,
-		lockDuration:   defaultLockDuration,
-		lockTries:      defaultLockTries,
-		waitTime:       defaultWaitTime,
-		disableCaching: false,
+		defaultTTL:           defaultTTL,
+		nilTTL:               defaultNilTTL,
+		lockDuration:         defaultLockDuration,
+		lockTries:            defaultLockTries,
+		waitTime:             defaultWaitTime,
+		disableCaching:       false,
+		enableDynamicTTL:     false,
+		cacheHitThreshold:    defaultCacheHitThreshold,
+		maxCacheTTL:          defaultMaxCacheTTL,
+		minCacheTTLThreshold: defaultMinCacheTTLThreshold,
+		multiplierFactor:     defaultMultiplierFactor,
 	}
 }
 
 // SetDefaultTTL :nodoc:
 func (k *keeper) SetDefaultTTL(d time.Duration) {
 	k.defaultTTL = d
+}
+
+// SetMultiplierFactor :nodoc:
+func (k *keeper) SetMultiplierFactor(d int64) {
+	k.multiplierFactor = d
+}
+
+// SetMaxCacheTTL maximum TTL allowed after extended. Only being used if Dynamic Cache is enabled
+func (k *keeper) SetMaxCacheTTL(d time.Duration) {
+	k.maxCacheTTL = d
+}
+
+// SetMinCacheTTLThreshold if current TTL is below this threshold, then the TTL won't be extended.
+// Only being used if Dynamic Cache is enabled
+func (k *keeper) SetMinCacheTTLThreshold(d time.Duration) {
+	k.maxCacheTTL = d
+}
+
+// SetCacheHitThreshold is the threshold before the cache is extended. If the counter hasn't reached the threshold, it won't be extended.
+// Only being used if Dynamic Cache is enabled
+func (k *keeper) SetCacheHitThreshold(d int64) {
+	k.cacheHitThreshold = d
 }
 
 func (k *keeper) SetNilTTL(d time.Duration) {
@@ -141,15 +184,28 @@ func (k *keeper) SetDisableCaching(b bool) {
 	k.disableCaching = b
 }
 
+// SetEnableDynamicTTL :nodoc:
+func (k *keeper) SetEnableDynamicTTL(b bool) {
+	k.enableDynamicTTL = b
+}
+
 // Get :nodoc:
 func (k *keeper) Get(key string) (cachedItem any, err error) {
 	if k.disableCaching {
 		return
 	}
 
-	cachedItem, err = get(k.connPool.Get(), key)
-	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
-		return
+	cachedItem, ttl, err := get(k.connPool.Get(), key)
+	switch err {
+	case nil, ErrKeyNotExist, redigo.ErrNil:
+	default:
+		return nil, err
+	}
+	if cachedItem != nil {
+		if k.enableDynamicTTL {
+			k.extendCacheTTL(key, ttl)
+		}
+		return cachedItem, nil
 	}
 
 	return nil, nil
@@ -161,8 +217,8 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 		return
 	}
 
-	cachedItem, err = get(k.connPool.Get(), key)
-	if err != nil && err != ErrKeyNotExist && err != redigo.ErrNil || cachedItem != nil {
+	cachedItem, err = k.Get(key)
+	if err != nil || cachedItem != nil {
 		return
 	}
 
@@ -180,7 +236,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 		}
 
 		if !k.isLocked(key) {
-			cachedItem, err = get(k.connPool.Get(), key)
+			cachedItem, ttlValue, err := get(k.connPool.Get(), key)
 			if err != nil {
 				if err == ErrKeyNotExist {
 					mutex, err = k.AcquireLock(key)
@@ -191,6 +247,9 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 					goto Wait
 				}
 				return nil, nil, err
+			}
+			if k.enableDynamicTTL {
+				k.extendCacheTTL(key, ttlValue)
 			}
 			return cachedItem, nil, nil
 		}
@@ -258,13 +317,7 @@ func (k *keeper) Store(mutex *redsync.Mutex, c Item) error {
 	}
 	defer SafeUnlock(mutex)
 
-	client := k.connPool.Get()
-	defer func() {
-		_ = client.Close()
-	}()
-
-	_, err := client.Do("SETEX", c.GetKey(), k.decideCacheTTL(c), c.GetValue())
-	return err
+	return k.StoreWithoutBlocking(c)
 }
 
 // StoreWithoutBlocking :nodoc:
@@ -278,7 +331,25 @@ func (k *keeper) StoreWithoutBlocking(c Item) error {
 		_ = client.Close()
 	}()
 
-	_, err := client.Do("SETEX", c.GetKey(), k.decideCacheTTL(c), c.GetValue())
+	err := client.Send("MULTI")
+	if err != nil {
+		return err
+	}
+
+	err = client.Send("SETEX", c.GetKey(), k.decideCacheTTL(c), c.GetValue())
+	if err != nil {
+		return err
+	}
+
+	if k.enableDynamicTTL {
+		// set counter cache to 0 with the same TTL as the main cache key
+		err = client.Send("SETEX", getCounterKey(c.GetKey()), k.decideCacheTTL(c), 0)
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err = client.Do("EXEC")
 	return err
 }
 
@@ -340,7 +411,7 @@ func (k *keeper) Purge(matchString string) error {
 	return nil
 }
 
-// IncreaseCachedValueByOne will increments the number stored at key by one.
+// IncreaseCachedValueByOne will increment the number stored at key by one.
 // If the key does not exist, it is set to 0 before performing the operation
 func (k *keeper) IncreaseCachedValueByOne(key string) error {
 	if k.disableCaching {
@@ -384,7 +455,7 @@ func (k *keeper) DeleteByKeys(keys []string) error {
 
 	var redisKeys []any
 	for _, key := range keys {
-		redisKeys = append(redisKeys, key)
+		redisKeys = append(redisKeys, key, getCounterKey(key))
 	}
 
 	_, err := client.Do("DEL", redisKeys...)
@@ -410,6 +481,13 @@ func (k *keeper) StoreMultiWithoutBlocking(items []Item) error {
 		err = client.Send("SETEX", item.GetKey(), k.decideCacheTTL(item), item.GetValue())
 		if err != nil {
 			return err
+		}
+		if k.enableDynamicTTL {
+			// set counter cache to 0 with the same TTL as the main cache key
+			err = client.Send("SETEX", getCounterKey(item.GetKey()), k.decideCacheTTL(item), 0)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -860,6 +938,63 @@ func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
 	return int64(k.defaultTTL.Seconds())
 }
 
+// extendCacheTTL will increase cache based on traffic
+// if the traffic reaches the threshold, it will extend the cache TTL
+// will not return error as this should not disturb the main operation
+func (k *keeper) extendCacheTTL(key string, ttl int64) {
+	// if current TTL is below the minimum threshold, just ignore it
+	if ttl < int64(k.minCacheTTLThreshold.Seconds()) {
+		return
+	}
+
+	counterKey := getCounterKey(key)
+	client := k.connPool.Get()
+	defer func() {
+		_ = client.Close()
+	}()
+
+	res, err := client.Do("INCR", counterKey)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	counterValue, ok := res.(int64)
+	if !ok || counterValue <= 0 {
+		return
+	}
+
+	// only increase TTL if the counter reaches threshold
+	if counterValue%k.cacheHitThreshold != 0 {
+		return
+	}
+
+	newTTL := ttl * k.multiplierFactor
+	if newTTL > int64(k.maxCacheTTL) {
+		newTTL = int64(k.maxCacheTTL)
+	}
+	err = client.Send("MULTI")
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	err = client.Send("EXPIRE", key, newTTL, "GT")
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	err = client.Send("EXPIRE", counterKey, newTTL, "GT")
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+
+	_, err = client.Do("EXEC")
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+}
+
 func (k *keeper) isLocked(key string) bool {
 	client := k.lockConnPool.Get()
 	defer func() {
@@ -872,4 +1007,8 @@ func (k *keeper) isLocked(key string) bool {
 	}
 
 	return true
+}
+
+func getCounterKey(mainKey string) string {
+	return fmt.Sprintf("%s:cache:hit:counter", mainKey)
 }
