@@ -482,6 +482,13 @@ func (k *keeper) StoreMultiWithoutBlocking(items []Item) error {
 		if err != nil {
 			return err
 		}
+		if k.enableDynamicTTL {
+			// set counter cache to 0 with the same TTL as the main cache key
+			err = client.Send("SETEX", getCounterKey(item.GetKey()), k.decideCacheTTL(item), 0)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	_, err = client.Do("EXEC")
