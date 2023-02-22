@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/bsm/redislock"
-	goredis "github.com/go-redis/redis/v8"
 	"github.com/jpillora/backoff"
+	goredis "github.com/redis/go-redis/v9"
 )
 
 // ErrNotFound :nodoc:
@@ -43,6 +43,8 @@ type (
 		SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) *goredis.BoolCmd
 		Eval(ctx context.Context, script string, keys []string, args ...interface{}) *goredis.Cmd
 		EvalSha(ctx context.Context, sha1 string, keys []string, args ...interface{}) *goredis.Cmd
+		EvalRO(ctx context.Context, script string, keys []string, args ...interface{}) *goredis.Cmd
+		EvalShaRO(ctx context.Context, sha1 string, keys []string, args ...interface{}) *goredis.Cmd
 		ScriptExists(ctx context.Context, hashes ...string) *goredis.BoolSliceCmd
 		ScriptLoad(ctx context.Context, script string) *goredis.StringCmd
 		Del(ctx context.Context, keys ...string) *goredis.IntCmd
@@ -337,9 +339,6 @@ func (k *keeper) StoreMultiWithoutBlocking(ctx context.Context, items []Item) (e
 	}
 
 	pipeline := k.connPool.TxPipeline()
-	defer func() {
-		err = pipeline.Close()
-	}()
 	for _, item := range items {
 		err = pipeline.Set(ctx, item.GetKey(), item.GetValue(), k.decideCacheTTL(item)).Err()
 		if err != nil {
@@ -358,9 +357,6 @@ func (k *keeper) StoreMultiPersist(ctx context.Context, items []Item) (err error
 	}
 
 	pipeline := k.connPool.TxPipeline()
-	defer func() {
-		err = pipeline.Close()
-	}()
 	for _, item := range items {
 		err = pipeline.Set(ctx, item.GetKey(), item.GetValue(), 0).Err()
 		if err != nil {
@@ -393,9 +389,6 @@ func (k *keeper) ExpireMulti(ctx context.Context, items map[string]time.Duration
 	}
 
 	pipeline := k.connPool.TxPipeline()
-	defer func() {
-		err = pipeline.Close()
-	}()
 	for k, duration := range items {
 		err = pipeline.Expire(ctx, k, duration).Err()
 		if err != nil {
@@ -551,10 +544,6 @@ func (k *keeper) StoreHashMember(ctx context.Context, identifier string, c Item)
 	}
 
 	pipeline := k.connPool.TxPipeline()
-	defer func() {
-		err = pipeline.Close()
-	}()
-
 	err = pipeline.HSet(ctx, identifier, c.GetKey(), c.GetValue()).Err()
 	if err != nil {
 		return err
@@ -654,8 +643,6 @@ func (k *keeper) GetMultiHashMembers(ctx context.Context, hashMember []HashMembe
 	}
 
 	pipe := k.connPool.Pipeline()
-	defer pipe.Close()
-
 	for _, hm := range hashMember {
 		replies = append(replies, pipe.HGet(ctx, hm.Identifier, hm.Key))
 	}
