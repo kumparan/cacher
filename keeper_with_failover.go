@@ -53,6 +53,15 @@ func (k *KeeperWithFailover) SetFailoverConnectionPool(c *redigo.Pool) {
 
 // GetOrSet :nodoc:
 func (k *KeeperWithFailover) GetOrSet(key string, fn GetterFn, opts ...func(Item)) (res []byte, err error) {
+	if k.disableCaching {
+		myResp, err := fn()
+		if err != nil {
+			return nil, err
+		}
+
+		return json.Marshal(myResp)
+	}
+
 	cachedValue, mu, err := k.GetOrLock(key)
 	if err != nil {
 		return
@@ -77,6 +86,10 @@ func (k *KeeperWithFailover) GetOrSet(key string, fn GetterFn, opts ...func(Item
 		cachedValue, err = k.GetFailover(key)
 		if err != nil {
 			return nil, err
+		}
+
+		if cachedValue == nil {
+			return nil, nil
 		}
 
 		return cachedValue.([]byte), nil
@@ -158,6 +171,15 @@ func (k *KeeperWithFailover) StoreFailover(c Item) error {
 
 // GetHashMemberOrSet :nodoc:
 func (k *KeeperWithFailover) GetHashMemberOrSet(identifier, key string, fn GetterFn, opts ...func(Item)) (res []byte, err error) {
+	if k.disableCaching {
+		myResp, err := fn()
+		if err != nil {
+			return nil, err
+		}
+
+		return json.Marshal(myResp)
+	}
+
 	cachedValue, mu, err := k.GetHashMemberOrLock(identifier, key)
 	if err != nil {
 		return
@@ -182,6 +204,10 @@ func (k *KeeperWithFailover) GetHashMemberOrSet(identifier, key string, fn Gette
 		cachedValue, err = k.GetHashMemberFailover(identifier, key)
 		if err != nil {
 			return nil, err
+		}
+
+		if cachedValue == nil {
+			return nil, nil
 		}
 
 		return cachedValue.([]byte), nil

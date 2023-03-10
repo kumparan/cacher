@@ -8,6 +8,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/jpillora/backoff v1.0.0
 	github.com/kumparan/redsync/v4 v4.0.0-20220629071359-52de590a1465
+	github.com/kumparan/tapao v1.2.0
 	github.com/sirupsen/logrus v1.9.0
 	github.com/stretchr/testify v1.7.5
 )
@@ -18,7 +19,10 @@ require (
 	github.com/go-redsync/redsync/v4 v4.5.1 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/vmihailenco/msgpack/v5 v5.3.5 // indirect
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/yuin/gopher-lua v0.0.0-20220504180219-658193537a64 // indirect
 	golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8 // indirect
+	google.golang.org/protobuf v1.27.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
