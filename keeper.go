@@ -224,7 +224,7 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 
 	mutex, err = k.AcquireLock(key)
 	if err == nil {
-		return
+		return // nolint:nilerr
 	}
 
 	start := time.Now()
@@ -268,6 +268,15 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 
 // GetOrSet :nodoc:
 func (k *keeper) GetOrSet(key string, fn GetterFn, opts ...func(Item)) (res []byte, err error) {
+	if k.disableCaching {
+		myResp, err := fn()
+		if err != nil {
+			return nil, err
+		}
+
+		return json.Marshal(myResp)
+	}
+
 	cachedValue, mu, err := k.GetOrLock(key)
 	if err != nil {
 		return
@@ -738,7 +747,7 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 
 	mutex, err = k.AcquireLock(lockKey)
 	if err == nil {
-		return
+		return // nolint:nilerr
 	}
 
 	start := time.Now()
@@ -779,6 +788,14 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 
 // GetHashMemberOrSet :nodoc:
 func (k *keeper) GetHashMemberOrSet(identifier, key string, fn GetterFn, opts ...func(Item)) (res []byte, err error) {
+	if k.disableCaching {
+		myResp, err := fn()
+		if err != nil {
+			return nil, err
+		}
+
+		return json.Marshal(myResp)
+	}
 	cachedValue, mu, err := k.GetHashMemberOrLock(identifier, key)
 	if err != nil {
 		return
