@@ -1215,3 +1215,107 @@ func TestHashScan_Empty(t *testing.T) {
 	assert.Empty(t, result)
 	assert.EqualValues(t, 0, cursor)
 }
+
+func TestGetMultipleOrLock(t *testing.T) {
+	t.Run("success get all locks", func(t *testing.T) {
+		k := NewKeeper()
+		m, err := miniredis.Run()
+		assert.NoError(t, err)
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+
+		keys := []string{"key1", "key2", "key3"}
+		items, mutexes, err := k.GetMultipleOrLock(keys)
+		assert.NoError(t, err)
+		assert.NotNil(t, mutexes)
+		assert.Equal(t, len(keys), len(mutexes))
+		assert.Equal(t, len(keys), len(items))
+	})
+
+	t.Run("success get locks for non existing items", func(t *testing.T) {
+		k := NewKeeper()
+		m, err := miniredis.Run()
+		assert.NoError(t, err)
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+		k.SetDefaultTTL(time.Minute)
+
+		keys := []string{"key1", "key2", "key3"}
+
+		err = k.StoreMultiWithoutBlocking([]Item{NewItem("key2", "key2")})
+		assert.NoError(t, err)
+
+		items, mutexes, err := k.GetMultipleOrLock(keys)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(mutexes))
+		assert.Equal(t, len(keys), len(items))
+	})
+
+	t.Run("success get all cached items", func(t *testing.T) {
+		k := NewKeeper()
+		m, err := miniredis.Run()
+		assert.NoError(t, err)
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+		k.SetDefaultTTL(time.Minute)
+
+		keys := []string{"key1", "key2", "key3"}
+		items := []Item{
+			NewItem("key1", "key1"),
+			NewItem("key2", "key2"),
+			NewItem("key3", "key3"),
+		}
+
+		err = k.StoreMultiWithoutBlocking(items)
+		assert.NoError(t, err)
+
+		resp, mutexes, err := k.GetMultipleOrLock(keys)
+		assert.NoError(t, err)
+		assert.Nil(t, mutexes)
+		assert.Equal(t, len(keys), len(resp))
+	})
+
+	t.Run("success with wait for cache key to be exists", func(t *testing.T) {
+		k := NewKeeper()
+		m, err := miniredis.Run()
+		assert.NoError(t, err)
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+		k.SetDefaultTTL(time.Minute)
+
+		keys := []string{"key1", "key2", "key3"}
+
+		_, mutexes, err := k.GetMultipleOrLock(keys)
+		assert.NoError(t, err)
+		assert.Equal(t, len(keys), len(mutexes))
+
+		items := map[string]string{
+			"key1": "val1",
+			"key2": "val2",
+			"key3": "val3",
+		}
+
+		// store item asynchronously so next call to GetMultipleOrLock will get the result
+		go func() {
+			defer SafeUnlock(mutexes...)
+			time.Sleep(1 * time.Second)
+			var cacheItems []Item
+			for k, v := range items {
+				cacheItems = append(cacheItems, NewItem(k, v))
+			}
+			err := k.StoreMultiWithoutBlocking(cacheItems)
+			assert.NoError(t, err)
+		}()
+
+		resp2, mutexes2, err := k.GetMultipleOrLock(keys)
+		assert.NoError(t, err)
+		assert.Nil(t, mutexes2)
+		for i, k := range keys {
+			assert.EqualValues(t, items[k], resp2[i])
+		}
+	})
+}
