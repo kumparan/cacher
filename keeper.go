@@ -108,6 +108,7 @@ type (
 		// HASH BUCKET
 		GetHashMemberOrLock(ctx context.Context, identifier string, key string) (interface{}, *redislock.Lock, error)
 		StoreHashMember(context.Context, string, Item) error
+		StoreMultiHashMembers(ctx context.Context, identifiers []string, items []Item) error
 		GetHashMember(ctx context.Context, identifier string, key string) (interface{}, error)
 		DeleteHashMember(ctx context.Context, identifier string, key string) error
 		GetMultiHashMembers(ctx context.Context, hashMember []HashMember) ([]interface{}, error)
@@ -613,7 +614,30 @@ func (k *keeper) GetHashMemberOrLock(ctx context.Context, identifier string, key
 	return nil, nil, ErrWaitTooLong
 }
 
-// StoreHashMember :nodoc:
+// StoreMultiHashMembers :nodoc:
+func (k *keeper) StoreMultiHashMembers(ctx context.Context, identifiers []string, members []Item) (err error) {
+	if k.disableCaching {
+		return nil
+	}
+
+	pipeline := k.connPool.TxPipeline()
+
+	for i, v := range members {
+		err = pipeline.HSet(ctx, identifiers[i], v.GetKey(), v.GetValue()).Err()
+		if err != nil {
+			return err
+		}
+		err = pipeline.Expire(ctx, identifiers[i], k.decideCacheTTL(v)).Err()
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err = pipeline.Exec(ctx)
+	return
+}
+
+// GetHashMember :nodoc:
 func (k *keeper) GetHashMember(ctx context.Context, identifier string, key string) (value interface{}, err error) {
 	if k.disableCaching {
 		return
