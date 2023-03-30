@@ -644,7 +644,7 @@ func (k *keeper) GetMultiHashMembers(ctx context.Context, hashMember []HashMembe
 	if k.disableCaching {
 		var replies []interface{}
 		for range hashMember {
-			replies = append(replies, goredis.Nil)
+			replies = append(replies, goredis.NewStringResult("", goredis.Nil))
 		}
 		return replies, nil
 	}
