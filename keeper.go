@@ -639,7 +639,11 @@ func (k *keeper) GetHashMember(ctx context.Context, identifier string, key strin
 // to reduce looping and casting, so the caller is the one that should cast it
 func (k *keeper) GetMultiHashMembers(ctx context.Context, hashMember []HashMember) (replies []interface{}, err error) {
 	if k.disableCaching || len(hashMember) == 0 {
-		return
+		var replies []interface{}
+		for range hashMember {
+			replies = append(replies, goredis.Nil)
+		}
+		return replies, nil
 	}
 
 	pipe := k.connPool.Pipeline()
