@@ -638,7 +638,10 @@ func (k *keeper) GetHashMember(ctx context.Context, identifier string, key strin
 // GetMultiHashMembers return type is *goredis.StringCmd
 // to reduce looping and casting, so the caller is the one that should cast it
 func (k *keeper) GetMultiHashMembers(ctx context.Context, hashMember []HashMember) (replies []interface{}, err error) {
-	if k.disableCaching || len(hashMember) == 0 {
+	if len(hashMember) == 0 {
+		return nil, nil
+	}
+	if k.disableCaching {
 		var replies []interface{}
 		for range hashMember {
 			replies = append(replies, goredis.Nil)
