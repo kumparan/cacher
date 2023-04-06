@@ -4,12 +4,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
+
+	"github.com/hashicorp/go-multierror"
 
 	"github.com/sirupsen/logrus"
 
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/jpillora/backoff"
+	"github.com/kumparan/go-utils"
 	"github.com/kumparan/redsync/v4"
 	redigosync "github.com/kumparan/redsync/v4/redis/redigo"
 )
@@ -38,6 +42,7 @@ type (
 		Get(key string) (any, error)
 		GetOrLock(key string) (any, *redsync.Mutex, error)
 		GetOrSet(key string, fn GetterFn, opts ...func(Item)) ([]byte, error)
+		GetMultipleOrLock(keys []string) ([]any, []*redsync.Mutex, error)
 		Store(*redsync.Mutex, Item) error
 		StoreWithoutBlocking(Item) error
 		StoreMultiWithoutBlocking([]Item) error
@@ -80,6 +85,7 @@ type (
 		GetHashMemberOrLock(identifier string, key string) (any, *redsync.Mutex, error)
 		GetHashMemberOrSet(identifier, key string, fn GetterFn, opts ...func(Item)) ([]byte, error)
 		StoreHashMember(string, Item) error
+		GetMultiHashMembersOrLock(identifiers []string, keys []string) (cachedItems []any, mutexes []*redsync.Mutex, err error)
 		StoreHashNilMember(identifier, cacheKey string) error
 		GetHashMember(identifier string, key string) (any, error)
 		DeleteHashMember(identifier string, key string) error
@@ -104,7 +110,43 @@ type (
 		lockTries         int
 		cacheHitThreshold int64
 	}
+
+	itemWithKey struct {
+		Key  string
+		Item any
+	}
+
+	itemWithKeyAndIdentifier struct {
+		Key        string
+		Item       any
+		Identifier string
+	}
+
+	mutexWithKey struct {
+		Key   string
+		Mutex *redsync.Mutex
+	}
+
+	mutexWithKeyAndIdentifier struct {
+		Key        string
+		Mutex      *redsync.Mutex
+		Identifier string
+	}
+
+	errorWithKey struct {
+		key        string
+		innerError error
+	}
 )
+
+// Error implements built-in error interface
+func (ewk *errorWithKey) Error() string {
+	var msg string
+	if ewk.innerError != nil {
+		msg = ewk.innerError.Error()
+	}
+	return fmt.Sprintf("err on key %s : %s", ewk.key, msg)
+}
 
 // NewKeeper :nodoc:
 func NewKeeper() Keeper {
@@ -317,6 +359,179 @@ func (k *keeper) GetOrSet(key string, fn GetterFn, opts ...func(Item)) (res []by
 	}
 	_ = k.Store(mu, cacheItem)
 	return cachedValue.([]byte), nil
+}
+
+// GetMultipleOrLock get multiple and apply locks for non-existing keys on redis.
+// Returned cached items will be in order based on keys provided, if the value for some key is not exist then it will be marked as nil on
+// returned cached items slice.
+// TODO: refactor this when you are bored
+func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []*redsync.Mutex, err error) {
+	if k.disableCaching {
+		return
+	}
+
+	c := k.connPool.Get()
+	defer func() {
+		_ = c.Close()
+	}()
+
+	err = sendMultipleGetCommands(c, keys)
+	if err != nil {
+		return
+	}
+
+	err = c.Flush()
+	if err != nil {
+		return
+	}
+
+	var (
+		keysToLock     []string
+		cachedItemsBuf = make(map[string]any)
+		mutexesBuf     = make(map[string]*redsync.Mutex)
+	)
+	for _, k := range keys {
+		rep, err := redigo.Bytes(c.Receive())
+		if err != nil && err != redigo.ErrNil {
+			return nil, nil, err
+		}
+		if rep == nil {
+			keysToLock = append(keysToLock, k)
+			continue
+		}
+		cachedItemsBuf[k] = rep
+	}
+
+	var (
+		itemCh  = make(chan itemWithKey)
+		errCh   = make(chan error)
+		mutexCh = make(chan mutexWithKey)
+	)
+	keysToLock = utils.Unique(keysToLock)
+	for _, key := range keysToLock {
+		go k.acquireLockOrGetValueThroughChan(key, mutexCh, itemCh, errCh)
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var errs *multierror.Error
+		counter := 0
+		for {
+			select {
+			case i := <-itemCh:
+				cachedItemsBuf[i.Key] = i.Item
+				counter++
+			case caseErr := <-errCh:
+				err = multierror.Append(errs, caseErr)
+				counter++
+			case m := <-mutexCh:
+				mutexesBuf[m.Key] = m.Mutex
+				counter++
+			default:
+				if counter == len(keysToLock) {
+					err = errs.ErrorOrNil()
+					return
+				}
+			}
+		}
+	}()
+	wg.Wait()
+
+	for _, k := range keys {
+		cachedItems = append(cachedItems, cachedItemsBuf[k])
+		if m, ok := mutexesBuf[k]; ok {
+			mutexes = append(mutexes, m)
+		}
+	}
+
+	return
+}
+
+func (k *keeper) acquireLockOrGetValueThroughChan(key string, mutexCh chan<- mutexWithKey, itemCh chan<- itemWithKey, errCh chan<- error) {
+	mutex, err := k.AcquireLock(key)
+	if err == nil {
+		mutexCh <- mutexWithKey{Mutex: mutex, Key: key}
+		return
+	}
+	start := time.Now()
+	for {
+		b := &backoff.Backoff{
+			Jitter: true,
+			Min:    20 * time.Millisecond,
+			Max:    200 * time.Millisecond,
+		}
+
+		if !k.isLocked(key) {
+			cachedItem, err := k.Get(key)
+			if err != nil {
+				if err == ErrKeyNotExist {
+					mutex, err = k.AcquireLock(key)
+					if err == nil {
+						mutexCh <- mutexWithKey{Mutex: mutex, Key: key}
+						return
+					}
+					goto Wait
+				}
+				errCh <- &errorWithKey{key: key, innerError: err}
+				return
+			}
+			itemCh <- itemWithKey{Item: cachedItem, Key: key}
+			return
+		}
+
+	Wait:
+		elapsed := time.Since(start)
+		if elapsed >= k.waitTime {
+			errCh <- &errorWithKey{key: key, innerError: ErrWaitTooLong}
+			return
+		}
+		time.Sleep(b.Duration())
+	}
+}
+
+func (k *keeper) acquireLockOrHGetValueThroughChan(identifier string, key string, mutexCh chan<- mutexWithKeyAndIdentifier, itemCh chan<- itemWithKeyAndIdentifier, errCh chan<- error) {
+	lockKey := fmt.Sprintf("%s:%s", identifier, key)
+	mutex, err := k.AcquireLock(lockKey)
+	if err == nil {
+		mutexCh <- mutexWithKeyAndIdentifier{Mutex: mutex, Key: key, Identifier: identifier}
+		return
+	}
+	start := time.Now()
+	for {
+		b := &backoff.Backoff{
+			Jitter: true,
+			Min:    20 * time.Millisecond,
+			Max:    200 * time.Millisecond,
+		}
+
+		if !k.isLocked(key) {
+			cachedItem, err := k.GetHashMember(identifier, key)
+			if err != nil {
+				if err == ErrKeyNotExist {
+					mutex, err = k.AcquireLock(lockKey)
+					if err == nil {
+						mutexCh <- mutexWithKeyAndIdentifier{Mutex: mutex, Key: key, Identifier: identifier}
+						return
+					}
+					goto Wait
+				}
+				errCh <- &errorWithKey{key: key, innerError: err}
+				return
+			}
+			itemCh <- itemWithKeyAndIdentifier{Identifier: identifier, Key: key, Item: cachedItem}
+			return
+		}
+
+	Wait:
+		elapsed := time.Since(start)
+		if elapsed >= k.waitTime {
+			errCh <- &errorWithKey{key: key, innerError: ErrWaitTooLong}
+			return
+		}
+		time.Sleep(b.Duration())
+	}
 }
 
 // Store :nodoc:
@@ -786,6 +1001,116 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 	return nil, nil, ErrWaitTooLong
 }
 
+// GetMultiHashMembersOrLock get multiple hash members if the item exists, otherwise it will return the mutexes for non-existing items.
+// Returned cachedItems will have the same length as the keys length eventhough the item is not exist. The value of non-existing item will be nil.
+// Returned mutexes will have the same length as the non-existing items.
+// TODO: refactor this when you are bored
+func (k *keeper) GetMultiHashMembersOrLock(identifiers []string, keys []string) (cachedItems []any, mutexes []*redsync.Mutex, err error) {
+	if k.disableCaching {
+		return
+	}
+
+	if len(identifiers) != len(keys) {
+		return nil, nil, fmt.Errorf("identifiers and keys must have the same length")
+	}
+
+	c := k.connPool.Get()
+	defer func() {
+		_ = c.Close()
+	}()
+
+	for i, id := range identifiers {
+		err = c.Send("HEXISTS", id, keys[i])
+		if err != nil {
+			return nil, nil, err
+		}
+		err = c.Send("HGET", id, keys[i])
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	err = c.Flush()
+	if err != nil {
+		return
+	}
+
+	var (
+		keyIndexesToLock []int
+		cachedItemsBuf   = make(map[string]any)
+		mutexesBuf       = make(map[string]*redsync.Mutex)
+	)
+
+	for i, id := range identifiers {
+		exists, err := redigo.Int(c.Receive())
+		if err != nil {
+			return nil, nil, err
+		}
+		if exists == 0 {
+			keyIndexesToLock = append(keyIndexesToLock, i)
+			_, _ = c.Receive()
+			continue
+		}
+
+		cachedItem, err := redigo.Bytes(c.Receive())
+		if err != nil {
+			return nil, nil, err
+		}
+		cachedItemsBuf[fmt.Sprintf("%s:%s", id, keys[i])] = cachedItem
+	}
+
+	var (
+		itemCh        = make(chan itemWithKeyAndIdentifier)
+		errCh         = make(chan error)
+		mutexCh       = make(chan mutexWithKeyAndIdentifier)
+		duplicateFlag = make(map[string]bool)
+	)
+
+	for _, idx := range keyIndexesToLock {
+		if duplicateFlag[fmt.Sprintf("%s:%s", identifiers[idx], keys[idx])] {
+			continue
+		}
+		duplicateFlag[fmt.Sprintf("%s:%s", identifiers[idx], keys[idx])] = true
+		go k.acquireLockOrHGetValueThroughChan(identifiers[idx], keys[idx], mutexCh, itemCh, errCh)
+	}
+
+	// wait for lock or value
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var errs *multierror.Error
+		counter := 0
+		for {
+			select {
+			case i := <-itemCh:
+				cachedItemsBuf[fmt.Sprintf("%s:%s", i.Identifier, i.Key)] = i.Item
+				counter++
+			case caseErr := <-errCh:
+				err = multierror.Append(errs, caseErr)
+				counter++
+			case m := <-mutexCh:
+				mutexesBuf[fmt.Sprintf("%s:%s", m.Identifier, m.Key)] = m.Mutex
+				counter++
+			default:
+				if counter == len(keyIndexesToLock) {
+					err = errs.ErrorOrNil()
+					return
+				}
+			}
+		}
+	}()
+	wg.Wait()
+	for i, id := range identifiers {
+		cachedItems = append(cachedItems, cachedItemsBuf[fmt.Sprintf("%s:%s", id, keys[i])])
+		if m, ok := mutexesBuf[fmt.Sprintf("%s:%s", id, keys[i])]; ok {
+			mutexes = append(mutexes, m)
+		}
+	}
+
+	return
+}
+
 // GetHashMemberOrSet :nodoc:
 func (k *keeper) GetHashMemberOrSet(identifier, key string, fn GetterFn, opts ...func(Item)) (res []byte, err error) {
 	if k.disableCaching {
@@ -1024,6 +1349,16 @@ func (k *keeper) isLocked(key string) bool {
 	}
 
 	return true
+}
+
+func sendMultipleGetCommands(c redigo.Conn, keys []string) (err error) {
+	for _, key := range keys {
+		err = c.Send("GET", key)
+		if err != nil {
+			return
+		}
+	}
+	return nil
 }
 
 func getCounterKey(mainKey string) string {
