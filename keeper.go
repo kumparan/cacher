@@ -367,6 +367,9 @@ func (k *keeper) GetOrSet(key string, fn GetterFn, opts ...func(Item)) (res []by
 // TODO: refactor this when you are bored
 func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []*redsync.Mutex, err error) {
 	if k.disableCaching {
+		for range keys {
+			cachedItems = append(cachedItems, nil)
+		}
 		return
 	}
 
@@ -1007,6 +1010,9 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 // TODO: refactor this when you are bored
 func (k *keeper) GetMultiHashMembersOrLock(identifiers []string, keys []string) (cachedItems []any, mutexes []*redsync.Mutex, err error) {
 	if k.disableCaching {
+		for range keys {
+			cachedItems = append(cachedItems, nil)
+		}
 		return
 	}
 
