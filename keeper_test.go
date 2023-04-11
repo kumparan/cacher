@@ -609,6 +609,28 @@ func TestKeeper_StoreHashMember(t *testing.T) {
 	}
 }
 
+func TestKeeper_StoreMultiHashMembers(t *testing.T) {
+	item1 := NewItem("key1", "value1")
+	item2 := NewItem("key2", "value2")
+	m := map[string][]Item{
+		"identifier1": {item1, item2},
+		"identifier2": {item2},
+	}
+	keeper := newTestKeeper()
+	ctx := context.TODO()
+
+	err := keeper.StoreMultiHashMembers(ctx, m)
+	assert.NoError(t, err)
+
+	for id, items := range m {
+		for _, item := range items {
+			val, err := keeper.GetHashMember(ctx, id, item.GetKey())
+			assert.NoError(t, err)
+			assert.EqualValues(t, item.GetValue(), val)
+		}
+	}
+}
+
 func TestKeeper_StoreMultiWithoutBlocking(t *testing.T) {
 	ctx := context.TODO()
 
