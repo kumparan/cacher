@@ -106,7 +106,7 @@ type (
 		// HASH BUCKET
 		GetHashMemberOrLock(ctx context.Context, identifier string, key string) (interface{}, *redislock.Lock, error)
 		StoreHashMember(context.Context, string, Item) error
-		StoreMultiHashMembers(ctx context.Context, identifiers []string, items []Item) error
+		StoreMultiHashMembers(ctx context.Context, mapIdentifiersToItems map[string][]Item) error
 		GetHashMember(ctx context.Context, identifier string, key string) (interface{}, error)
 		DeleteHashMember(ctx context.Context, identifier string, key string) error
 		GetMultiHashMembers(ctx context.Context, hashMember []HashMember) ([]interface{}, error)
@@ -570,26 +570,26 @@ func (k *keeper) StoreHashMember(ctx context.Context, identifier string, c Item)
 }
 
 // StoreMultiHashMembers :nodoc:
-func (k *keeper) StoreMultiHashMembers(ctx context.Context, identifiers []string, members []Item) (err error) {
+func (k *keeper) StoreMultiHashMembers(ctx context.Context, mapIdentifiersToMembers map[string][]Item) (err error) {
 	if k.disableCaching {
 		return nil
 	}
-	if len(identifiers) != len(members) {
-		return errors.New("identifiers and members length must be same")
-	}
+
 	pipeline := k.connPool.TxPipeline()
 	defer func() {
 		err = pipeline.Close()
 	}()
 
-	for i, v := range members {
-		err = pipeline.HSet(ctx, identifiers[i], v.GetKey(), v.GetValue()).Err()
-		if err != nil {
-			return err
-		}
-		err = pipeline.Expire(ctx, identifiers[i], k.decideCacheTTL(v)).Err()
-		if err != nil {
-			return err
+	for i, items := range mapIdentifiersToMembers {
+		for _, v := range items {
+			err = pipeline.HSet(ctx, i, v.GetKey(), v.GetValue()).Err()
+			if err != nil {
+				return err
+			}
+			err = pipeline.Expire(ctx, i, k.decideCacheTTL(v)).Err()
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -653,7 +653,7 @@ func (k *keeper) GetHashMemberOrLock(ctx context.Context, identifier string, key
 	return nil, nil, ErrWaitTooLong
 }
 
-// StoreHashMember :nodoc:
+// GetHashMember :nodoc:
 func (k *keeper) GetHashMember(ctx context.Context, identifier string, key string) (value interface{}, err error) {
 	if k.disableCaching {
 		return
