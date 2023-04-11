@@ -574,7 +574,9 @@ func (k *keeper) StoreMultiHashMembers(ctx context.Context, identifiers []string
 	if k.disableCaching {
 		return nil
 	}
-
+	if len(identifiers) != len(members) {
+		return errors.New("identifiers and members length must be same")
+	}
 	pipeline := k.connPool.TxPipeline()
 	defer func() {
 		err = pipeline.Close()
