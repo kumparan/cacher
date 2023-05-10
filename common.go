@@ -1,6 +1,8 @@
 package cacher
 
 import (
+	"encoding/json"
+	"fmt"
 	"strconv"
 
 	redigo "github.com/gomodule/redigo/redis"
@@ -14,6 +16,21 @@ func SafeUnlock(mutexes ...*redsync.Mutex) {
 			_, _ = m.Unlock()
 		}
 	}
+}
+
+// ParseCacheResultToPointerObject parse cache result to any object you want
+func ParseCacheResultToPointerObject[T any](in any) (*T, error) {
+	var obj *T
+	by, ok := in.([]byte)
+	if !ok {
+		return nil, fmt.Errorf("failed to cast %T to byte", in)
+	}
+
+	err := json.Unmarshal(by, &obj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal %s to %T", by, obj)
+	}
+	return obj, nil
 }
 
 // parse result return from scan

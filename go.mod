@@ -7,6 +7,7 @@ require (
 	github.com/gomodule/redigo v1.8.9
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/jpillora/backoff v1.0.0
+	github.com/kumparan/go-utils v1.32.0
 	github.com/kumparan/redsync/v4 v4.0.0-20220629071359-52de590a1465
 	github.com/sirupsen/logrus v1.9.0
 	github.com/stretchr/testify v1.7.5
@@ -24,7 +25,6 @@ require (
 	github.com/gorilla/css v1.0.0 // indirect
 	github.com/graph-gophers/graphql-go v1.4.0 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
-	github.com/kumparan/go-utils v1.30.0 // indirect
 	github.com/leekchan/accounting v0.3.1 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.19 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
