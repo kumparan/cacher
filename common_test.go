@@ -88,7 +88,7 @@ func TestStoreMapValues(t *testing.T) {
 			buffer[key] = &TestObj{ID: key}
 		}
 
-		StoreCaches[int64, TestObj](k, keys, buffer, testCacheKey)
+		StoreCaches[int64, *TestObj](k, keys, buffer, testCacheKey)
 
 		for _, key := range keys {
 			assert.True(t, m.Exists(testCacheKey(key)))
@@ -111,7 +111,7 @@ func TestStoreMapValues(t *testing.T) {
 
 		testKeys := []int64{4, 7, 8}
 
-		StoreCaches[int64, TestObj](k, []int64{4, 7, 8}, buffer, testCacheKey)
+		StoreCaches[int64, *TestObj](k, []int64{4, 7, 8}, buffer, testCacheKey)
 
 		for _, key := range testKeys {
 			if key == 4 {

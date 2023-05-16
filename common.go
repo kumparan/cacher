@@ -137,7 +137,7 @@ func getHashMember(client redigo.Conn, identifier, key string) (value any, err e
 }
 
 // StoreCaches store multiple object by keys
-func StoreCaches[K comparable, V any](cacheKeeper Keeper, keys []K, buffer map[K]*V, cacheKeyFunc func(K) string) {
+func StoreCaches[K comparable, V any](cacheKeeper Keeper, keys []K, buffer map[K]V, cacheKeyFunc func(K) string) {
 	logger := logrus.WithFields(logrus.Fields{
 		"keys":   keys,
 		"buffer": utils.Dump(buffer),
