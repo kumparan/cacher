@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/kumparan/go-utils"
+	"github.com/sirupsen/logrus"
+
 	redigo "github.com/gomodule/redigo/redis"
 	"github.com/kumparan/redsync/v4"
 )
@@ -131,4 +134,33 @@ func getHashMember(client redigo.Conn, identifier, key string) (value any, err e
 	}
 
 	return res[1], nil
+}
+
+func StoreCaches[K comparable, V any](cacheKeeper Keeper, keys []K, buffer map[K]*V, cacheKeyFunc func(K) string) {
+	logger := logrus.WithFields(logrus.Fields{
+		"keys":   keys,
+		"buffer": utils.Dump(buffer),
+	})
+
+	var cacheItems []Item
+	for _, key := range keys {
+		val, ok := buffer[key]
+		if !ok {
+			cacheItems = append(cacheItems, NewItem(cacheKeyFunc(key), []byte("null")))
+			continue
+		}
+
+		jsonVal, err := json.Marshal(val)
+		if err != nil {
+			logger.WithField("key", key).Error(err)
+			continue
+		}
+
+		cacheItems = append(cacheItems, NewItem(cacheKeyFunc(key), jsonVal))
+	}
+
+	err := cacheKeeper.StoreMultiWithoutBlocking(cacheItems)
+	if err != nil {
+		logger.WithField("cacheItems", utils.Dump(cacheItems)).Error(err)
+	}
 }
