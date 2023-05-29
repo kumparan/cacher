@@ -3,6 +3,7 @@ package cacher
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"testing"
 	"time"
@@ -1316,6 +1317,39 @@ func TestGetMultipleOrLock(t *testing.T) {
 		assert.Nil(t, mutexes2)
 		for i, k := range keys {
 			assert.EqualValues(t, items[k], resp2[i])
+		}
+	})
+
+	t.Run("success with dynamic TTL", func(t *testing.T) {
+		k := NewKeeper()
+		m, err := miniredis.Run()
+		assert.NoError(t, err)
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+		k.SetEnableDynamicTTL(true)
+		k.SetCacheHitThreshold(5)
+		k.SetMultiplierFactor(2)
+		defaultTTL := time.Minute
+		k.SetDefaultTTL(defaultTTL)
+
+		keys := []string{"key1", "key2", "key3"}
+		items := []Item{
+			NewItem("key1", "key1"),
+			NewItem("key2", "key2"),
+			NewItem("key3", "key3"),
+		}
+
+		err = k.StoreMultiWithoutBlocking(items)
+		assert.NoError(t, err)
+		for i := 0; i < 20; i++ {
+			resp, mutexes, err := k.GetMultipleOrLock(keys)
+			assert.NoError(t, err)
+			assert.Nil(t, mutexes)
+			assert.Equal(t, len(keys), len(resp))
+		}
+		for _, key := range keys {
+			assert.LessOrEqual(t, m.TTL(key), defaultTTL*time.Duration(math.Pow(float64(2), float64(4))))
 		}
 	})
 }
