@@ -393,16 +393,25 @@ func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []
 		cachedItemsBuf = make(map[string]any)
 		mutexesBuf     = make(map[string]*redsync.Mutex)
 	)
-	for _, k := range keys {
+	for _, key := range keys {
 		rep, err := redigo.Bytes(c.Receive())
 		if err != nil && err != redigo.ErrNil {
 			return nil, nil, err
 		}
 		if rep == nil {
-			keysToLock = append(keysToLock, k)
+			keysToLock = append(keysToLock, key)
+			_, _ = c.Receive()
 			continue
 		}
-		cachedItemsBuf[k] = rep
+		ttl, err := c.Receive()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		cachedItemsBuf[key] = rep
+		if k.enableDynamicTTL {
+			k.extendCacheTTL(key, ttl.(int64))
+		}
 	}
 
 	var (
@@ -1360,6 +1369,10 @@ func (k *keeper) isLocked(key string) bool {
 func sendMultipleGetCommands(c redigo.Conn, keys []string) (err error) {
 	for _, key := range keys {
 		err = c.Send("GET", key)
+		if err != nil {
+			return
+		}
+		err = c.Send("TTL", key)
 		if err != nil {
 			return
 		}
