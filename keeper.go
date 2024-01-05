@@ -616,7 +616,7 @@ func (k *keeper) GetHashMemberOrLock(ctx context.Context, identifier string, key
 				return nil, nil, err
 			// cache not found, try to get another lock
 			case err == goredis.Nil || cachedItem == nil:
-				mutex, err = k.AcquireLock(ctx, key)
+				mutex, err = k.AcquireLock(ctx, lockKey)
 				if err == nil {
 					return nil, mutex, nil
 				}
