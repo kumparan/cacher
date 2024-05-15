@@ -53,6 +53,7 @@ type (
 		Purge(string) error
 		DeleteByKeys([]string) error
 		IncreaseCachedValueByOne(key string) error
+		DecreaseCachedValueByOne(key string) error
 
 		AcquireLock(string) (*redsync.Mutex, error)
 		SetDefaultTTL(time.Duration)
@@ -660,6 +661,21 @@ func (k *keeper) IncreaseCachedValueByOne(key string) error {
 	}()
 
 	_, err := client.Do("INCR", key)
+	return err
+}
+
+// DecreaseCachedValueByOne will decrement the number stored at key by one.
+func (k *keeper) DecreaseCachedValueByOne(key string) error {
+	if k.disableCaching {
+		return nil
+	}
+
+	client := k.connPool.Get()
+	defer func() {
+		_ = client.Close()
+	}()
+
+	_, err := client.Do("DECR", key)
 	return err
 }
 

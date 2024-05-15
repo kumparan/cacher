@@ -415,6 +415,37 @@ func TestIncreaseCachedValueByOne(t *testing.T) {
 	assert.EqualValues(t, 1, count)
 }
 
+func TestDecreaseCachedValueByOne(t *testing.T) {
+	// Initialize new cache keeper
+	k := NewKeeper()
+
+	m, err := miniredis.Run()
+	assert.NoError(t, err)
+
+	r := newRedisConn(m.Addr())
+	k.SetConnectionPool(r)
+	k.SetLockConnectionPool(r)
+
+	testKey := "decrease-test"
+	_, mu, err := k.GetOrLock(testKey)
+	assert.NoError(t, err)
+
+	err = k.Store(mu, NewItem(testKey, 1))
+	assert.NoError(t, err)
+
+	err = k.DecreaseCachedValueByOne(testKey)
+	assert.NoError(t, err)
+
+	reply, _, err := k.GetOrLock(testKey)
+	assert.NoError(t, err)
+
+	var count int64
+	bt, _ := reply.([]byte)
+	err = json.Unmarshal(bt, &count)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 0, count)
+}
+
 func TestDeleteByKeys(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		// Initialize new cache keeper

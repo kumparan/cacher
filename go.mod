@@ -1,6 +1,6 @@
 module github.com/kumparan/cacher
 
-go 1.18
+go 1.22
 
 require (
 	github.com/alicebob/miniredis/v2 v2.30.0
