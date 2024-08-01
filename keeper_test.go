@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,16 @@ func newTestKeeper() *keeper {
 		defaultTTL:     defaultTTL,
 		nilTTL:         defaultNilTTL,
 		waitTime:       defaultWaitTime,
+	}
+}
+
+func BenchmarkStringToBytes(b *testing.B) {
+	s := strings.Repeat("hello", 300)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		a := StringToBytes(s)
+		_ = a
 	}
 }
 

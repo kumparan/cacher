@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unsafe"
 
 	"github.com/bsm/redislock"
 	"github.com/jpillora/backoff"
@@ -428,7 +429,7 @@ func (k *keeper) getCachedItem(ctx context.Context, key string) (value interface
 		value = nil
 		return
 	}
-	value = []byte(resp)
+	value = StringToBytes(resp)
 
 	return
 }
@@ -656,7 +657,7 @@ func (k *keeper) GetHashMember(ctx context.Context, identifier string, key strin
 		value = nil
 		return
 	}
-	value = []byte(resp)
+	value = StringToBytes(resp)
 	return
 }
 
@@ -724,4 +725,11 @@ func SafeUnlock(ctx context.Context, mutex *redislock.Lock) {
 	if mutex != nil {
 		_ = mutex.Release(ctx)
 	}
+}
+
+func StringToBytes(s string) []byte {
+	if len(s) == 0 {
+		return nil
+	}
+	return unsafe.Slice(unsafe.StringData(s), len(s))
 }
