@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/kumparan/go-utils"
 	"github.com/sirupsen/logrus"
@@ -158,6 +159,36 @@ func StoreCaches[K comparable, V any](cacheKeeper Keeper, keys []K, buffer map[K
 		}
 
 		cacheItems = append(cacheItems, NewItem(cacheKeyFunc(key), jsonVal))
+	}
+
+	err := cacheKeeper.StoreMultiWithoutBlocking(cacheItems)
+	if err != nil {
+		logger.WithField("cacheItems", utils.Dump(cacheItems)).Error(err)
+	}
+}
+
+// StoreCachesWithCustomTTL store multiple object by keys with custom ttl
+func StoreCachesWithCustomTTL[K comparable, V any](cacheKeeper Keeper, keys []K, buffer map[K]V, cacheKeyFunc func(K) string, ttl time.Duration) {
+	logger := logrus.WithFields(logrus.Fields{
+		"keys":   keys,
+		"buffer": utils.Dump(buffer),
+	})
+
+	var cacheItems []Item
+	for _, key := range keys {
+		val, ok := buffer[key]
+		if !ok {
+			cacheItems = append(cacheItems, NewItem(cacheKeyFunc(key), []byte("null")))
+			continue
+		}
+
+		jsonVal, err := json.Marshal(val)
+		if err != nil {
+			logger.WithField("key", key).Error(err)
+			continue
+		}
+
+		cacheItems = append(cacheItems, NewItemWithCustomTTL(cacheKeyFunc(key), jsonVal, ttl))
 	}
 
 	err := cacheKeeper.StoreMultiWithoutBlocking(cacheItems)
