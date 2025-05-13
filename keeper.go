@@ -71,7 +71,7 @@ type (
 
 		CheckKeyExist(string) (bool, error)
 
-		//list
+		// list
 		StoreRightList(string, any) error
 		StoreLeftList(string, any) error
 		GetList(string, int64, int64) (any, error)
