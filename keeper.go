@@ -54,6 +54,9 @@ type (
 		DeleteByKeys([]string) error
 		IncreaseCachedValueByOne(key string) error
 
+		IncreaseValueBy(key string, increaseBy int64) error
+		DecreaseValueBy(key string, decreaseBy int64) error
+
 		AcquireLock(string) (*redsync.Mutex, error)
 		SetDefaultTTL(time.Duration)
 		SetNilTTL(time.Duration)
@@ -660,6 +663,38 @@ func (k *keeper) IncreaseCachedValueByOne(key string) error {
 	}()
 
 	_, err := client.Do("INCR", key)
+	return err
+}
+
+// IncreaseValueBy will increment the value by given integer.
+// If the key does not exist, it is set to 0 before performing the operation
+func (k *keeper) IncreaseValueBy(key string, incrBy int64) error {
+	if k.disableCaching {
+		return nil
+	}
+
+	client := k.connPool.Get()
+	defer func() {
+		_ = client.Close()
+	}()
+
+	_, err := client.Do("INCRBY", key, incrBy)
+	return err
+}
+
+// DecreaseValueBy will decrement the value by given integer.
+// If the key does not exist, it is set to 0 before performing the operation
+func (k *keeper) DecreaseValueBy(key string, decrBy int64) error {
+	if k.disableCaching {
+		return nil
+	}
+
+	client := k.connPool.Get()
+	defer func() {
+		_ = client.Close()
+	}()
+
+	_, err := client.Do("DECRBY", key, decrBy)
 	return err
 }
 
