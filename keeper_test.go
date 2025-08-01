@@ -41,7 +41,7 @@ func newRedisConn(url string) *redigo.Pool {
 			}
 			return c, err
 		},
-		TestOnBorrow: func(c redigo.Conn, t time.Time) error {
+		TestOnBorrow: func(c redigo.Conn, _ time.Time) error {
 			_, err := c.Do("PING")
 			return err
 		},
