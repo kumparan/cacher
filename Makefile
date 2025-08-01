@@ -15,6 +15,14 @@ check-cognitive-complexity:
 lint: check-cognitive-complexity
 	golangci-lint run
 
+changelog_args=-o CHANGELOG.md --tag-filter-pattern '^v'
+
+changelog:
+ifdef version
+	$(eval changelog_args=--next-tag $(version) $(changelog_args))
+endif
+	git-chglog $(changelog_args)
+
 test: lint test-only
 
 test-only:
