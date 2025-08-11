@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var client *redis.Client
@@ -378,6 +379,7 @@ func TestKeeper_GetHashMemberOrLock(t *testing.T) {
 			t.Fatal(cmd.Err())
 		}
 
+		require.Equal(t, int64(1), client.Exists(ctx, lockKey).Val())
 		doneCh := make(chan struct{})
 		go func() {
 			defer close(doneCh)
