@@ -7,7 +7,7 @@ require (
 	github.com/bsm/redislock v0.9.4
 	github.com/jpillora/backoff v1.0.0
 	github.com/redis/go-redis/v9 v9.12.0
-	github.com/stretchr/testify v1.8.1
+	github.com/stretchr/testify v1.10.0
 )
 
 require (
