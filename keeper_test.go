@@ -380,7 +380,7 @@ func TestKeeper_GetHashMemberOrLock(t *testing.T) {
 
 	t.Run("wait to getting lock", func(t *testing.T) {
 		keeper := newTestKeeper()
-		bucket := "test-bucket"
+		bucket := "test-bucket-2"
 		key := "test-get-or-lockKey"
 		lockKey := fmt.Sprintf("lockKey:%s:%s", bucket, key)
 
