@@ -123,7 +123,7 @@ func TestKeeper_GetOrLock(t *testing.T) {
 
 	t.Run("wait to getting lock", func(t *testing.T) {
 		keeper := newTestKeeper()
-		key := "test-get-or-lock"
+		key := "test-get-or-lock-2"
 
 		cmd := client.Set(ctx, "lock:"+key, []byte("test"), 500*time.Millisecond)
 		if cmd.Err() != nil {
