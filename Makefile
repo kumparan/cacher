@@ -9,5 +9,18 @@ endif
 
 test_command=$(GOCOMMAND) test ./... $(TEST_ARGS) -v --cover
 
-test:
+lint: 
+	golangci-lint run
+
+changelog_args=-o CHANGELOG.md --tag-filter-pattern '^v'
+
+changelog:
+ifdef version
+	$(eval changelog_args=--next-tag $(version) $(changelog_args))
+endif
+	git-chglog $(changelog_args)
+
+test: lint test-only
+
+test-only:
 	$(test_command)

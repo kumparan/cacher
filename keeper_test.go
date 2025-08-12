@@ -135,20 +135,25 @@ func TestKeeper_GetOrLock(t *testing.T) {
 			defer close(doneCh)
 			res, lock, err := keeper.GetOrLock(ctx, key)
 			if err != nil {
-				t.Fatal(err)
+				t.Error(err)
+				return
 			}
 			if lock != nil {
-				t.Fatal("should not getting the lock")
+				t.Error("should not getting the lock")
+				return
 			}
 			if res == nil {
-				t.Fatal("result should not be nil")
+				t.Error("result should not be nil")
+				return
 			}
 			b, ok := res.([]byte)
 			if !ok {
-				t.Fatal("failed to casting to bytes")
+				t.Error("failed to casting to bytes")
+				return
 			}
 			if string(b) != "test" {
-				t.Fatal("invalid value")
+				t.Error("invalid value")
+				return
 			}
 		}()
 
@@ -179,17 +184,22 @@ func TestKeeper_GetOrLock(t *testing.T) {
 			defer close(doneCh)
 			res, lock, err := keeper.GetOrLock(ctx, key)
 			if err != nil {
-				t.Fatal(err)
+				t.Error(err)
+				return
 			}
 			if lock == nil {
-				t.Fatal("should getting the new lock")
+				t.Error("should be getting the new lock")
+				return
+
 			}
 			if res != nil {
-				t.Fatal("result should be nil")
+				t.Error("result should be nil")
+				return
 			}
 
 			if err := lock.Release(ctx); err != nil {
-				t.Fatal("should not error")
+				t.Error("should not error")
+				return
 			}
 		}()
 
@@ -385,20 +395,25 @@ func TestKeeper_GetHashMemberOrLock(t *testing.T) {
 			defer close(doneCh)
 			res, lock, err := keeper.GetHashMemberOrLock(ctx, bucket, key)
 			if err != nil {
-				t.Fatal(err)
+				t.Error(err)
+				return
 			}
 			if lock != nil {
-				t.Fatal("should not getting the lock")
+				t.Error("should not getting the lock")
+				return
 			}
 			if res == nil {
-				t.Fatal("result should not be nil")
+				t.Error("result should not be nil")
+				return
 			}
 			b, ok := res.([]byte)
 			if !ok {
-				t.Fatal("failed to casting to bytes")
+				t.Error("failed to casting to bytes")
+				return
 			}
 			if string(b) != "test" {
-				t.Fatal("invalid value")
+				t.Error("invalid value")
+				return
 			}
 		}()
 
@@ -431,17 +446,21 @@ func TestKeeper_GetHashMemberOrLock(t *testing.T) {
 			defer close(doneCh)
 			res, lock, err := keeper.GetHashMemberOrLock(ctx, bucket, key)
 			if err != nil {
-				t.Fatal(err)
+				t.Error(err)
+				return
 			}
 			if lock == nil {
-				t.Fatal("should getting the new lock")
+				t.Error("should getting the new lock")
+				return
 			}
 			if res != nil {
-				t.Fatal("result should be nil")
+				t.Error("result should be nil")
+				return
 			}
 
 			if err := lock.Release(ctx); err != nil {
-				t.Fatal("should not error")
+				t.Error("should not error")
+				return
 			}
 		}()
 
