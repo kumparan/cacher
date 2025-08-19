@@ -17,6 +17,7 @@ changelog_args=-o CHANGELOG.md --tag-filter-pattern '^v'
 changelog:
 ifdef version
 	$(eval changelog_args=--next-tag $(version) $(changelog_args))
+	@echo $$(basename $$(git remote get-url origin) .git)@$(version) > VERSION
 endif
 	git-chglog $(changelog_args)
 
