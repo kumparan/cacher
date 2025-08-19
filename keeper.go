@@ -208,7 +208,7 @@ func (k *keeper) GetOrLock(ctx context.Context, key string) (cachedItem interfac
 
 	mutex, err = k.AcquireLock(ctx, key)
 	if err == nil {
-		return
+		return cachedItem, mutex, nil
 	}
 
 	start := time.Now()
@@ -325,9 +325,7 @@ func (k *keeper) DeleteByKeys(ctx context.Context, keys []string) error {
 	}
 
 	var redisKeys []string
-	for _, key := range keys {
-		redisKeys = append(redisKeys, key)
-	}
+	redisKeys = append(redisKeys, keys...)
 
 	_, err := k.connPool.Del(ctx, redisKeys...).Result()
 	return err
@@ -597,7 +595,7 @@ func (k *keeper) GetHashMemberOrLock(ctx context.Context, identifier string, key
 
 	mutex, err = k.AcquireLock(ctx, lockKey)
 	if err == nil {
-		return
+		return cachedItem, mutex, nil
 	}
 
 	start := time.Now()
@@ -720,6 +718,7 @@ func GetGoredisResult(reply interface{}) (string, error) {
 	return res, nil
 }
 
+// SafeUnlock :nodoc:
 func SafeUnlock(ctx context.Context, mutex *redislock.Lock) {
 	if mutex != nil {
 		_ = mutex.Release(ctx)
