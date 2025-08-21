@@ -1,5 +1,11 @@
 # cacher-v2
 
+<a name="v2.8.1"></a>
+## [v2.8.1] - 2025-08-21
+### Other Improvements
+- downgrade go-redis version to v9.11.0
+
+
 <a name="v2.8.0"></a>
 ## [v2.8.0] - 2025-08-19
 ### Code Improvements
@@ -612,7 +618,8 @@
 <a name="v1.0.0"></a>
 ## v1.0.0 - 2019-04-01
 
-[Unreleased]: https://github.com/kumparan/cacher/compare/v2.8.0...HEAD
+[Unreleased]: https://github.com/kumparan/cacher/compare/v2.8.1...HEAD
+[v2.8.1]: https://github.com/kumparan/cacher/compare/v2.8.0...v2.8.1
 [v2.8.0]: https://github.com/kumparan/cacher/compare/v1.20.0...v2.8.0
 [v1.20.0]: https://github.com/kumparan/cacher/compare/v1.19.0...v1.20.0
 [v1.19.0]: https://github.com/kumparan/cacher/compare/v1.18.0...v1.19.0
