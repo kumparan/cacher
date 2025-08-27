@@ -562,7 +562,7 @@ func (k *keeper) StoreMultiHashMembers(ctx context.Context, mapIdentifiersToMemb
 		return nil
 	}
 
-	pipeline := k.connPool.TxPipeline()
+	pipeline := k.connPool.Pipeline()
 	for i, items := range mapIdentifiersToMembers {
 		for _, v := range items {
 			err = pipeline.HSet(ctx, i, v.GetKey(), v.GetValue()).Err()
