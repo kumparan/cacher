@@ -562,7 +562,10 @@ func (k *keeper) StoreMultiHashMembers(ctx context.Context, mapIdentifiersToMemb
 		return nil
 	}
 
-	pipeline := k.connPool.TxPipeline()
+	// using Pipeline instead of TxPipeline because TxPipeline force operation on multiple keys
+	// to be done in 1 cluster slot, so it doesn't support multiple slot operation
+	// reference: https://stackoverflow.com/a/38042895
+	pipeline := k.connPool.Pipeline()
 	for i, items := range mapIdentifiersToMembers {
 		for _, v := range items {
 			err = pipeline.HSet(ctx, i, v.GetKey(), v.GetValue()).Err()
