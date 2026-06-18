@@ -402,7 +402,7 @@ func TestIncreaseCachedValueByOne(t *testing.T) {
 	err = k.Store(mu, NewItem(testKey, 0))
 	assert.NoError(t, err)
 
-	currVal, err := k.IncreaseCachedValueByOne(testKey)
+	currVal, err := k.IncreaseCachedValueByOne(testKey, 0)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), currVal)
 
@@ -434,7 +434,7 @@ func TestIncreaseValueBy(t *testing.T) {
 	err = k.Store(mu, NewItem(testKey, 0))
 	assert.NoError(t, err)
 
-	currVal, err := k.IncreaseValueBy(testKey, 10)
+	currVal, err := k.IncreaseValueBy(testKey, 10, 0)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(10), currVal)
 
@@ -466,7 +466,7 @@ func TestDecreaseValueBy(t *testing.T) {
 	err = k.Store(mu, NewItem(testKey, 1000))
 	assert.NoError(t, err)
 
-	currVal, err := k.DecreaseValueBy(testKey, 999)
+	currVal, err := k.DecreaseValueBy(testKey, 999, 0)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), currVal)
 
