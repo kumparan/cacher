@@ -1,13 +1,100 @@
 # cacher
 
-<a name="v1.20.0"></a>
-## [v1.20.0] - 2025-07-31
+<a name="v1.21.0"></a>
+## [v1.21.0] - 2026-06-18
+### Code Improvements
+- update go.mod libraries
+- rename rep to reply
+- using redigo package alias & add unit test
+- check mutex nil or not before unlock it
+
+### Fixes
+- fix get multi on disable caching
+- fix disable cache on GetOrSet ([#46](https://github.com/kumparan/cacher/issues/46))
+- only use json serializer ([#36](https://github.com/kumparan/cacher/issues/36))
+- handle missing error checking on Get ([#21](https://github.com/kumparan/cacher/issues/21))
+- handle multiple locks on nil cache result ([#20](https://github.com/kumparan/cacher/issues/20))
+
+### Fixes
+- handle nil keys
+- enable get or set to handle struct ([#35](https://github.com/kumparan/cacher/issues/35))
+- panic on casting nil interface ([#26](https://github.com/kumparan/cacher/issues/26))
+
+### New Features
+- support INCRBY and DECRBY ([#58](https://github.com/kumparan/cacher/issues/58))
+- add StoreCachesWithCustomTTL ([#57](https://github.com/kumparan/cacher/issues/57))
+- enable dynamic TTL on GetMultipleOrLock ([#53](https://github.com/kumparan/cacher/issues/53))
+- add StoreCaches
+- add ParseCacheResultToPointerObject ([#51](https://github.com/kumparan/cacher/issues/51))
+- get multi hashmembers or lock
+- get multiple or lock
+- enable dynamic cache ttl ([#44](https://github.com/kumparan/cacher/issues/44))
+- add github action to run unit test
+- add DeleteHashMember on failover keeper
+- delete and store nil with failover
+- failover cache decorator ([#32](https://github.com/kumparan/cacher/issues/32))
+- add SafeUnlock
+- change HashScan result to a map
+- add GetHashMemberThenDelete & HashScan
+- add GetHashKeys
+- add IncreaseHashMemberValue
+- add StoreHashNilMember
+- implement retry lock on empty cache on GetOrLock
+- retry lock on empty cache
+- remove garybird redis ([#17](https://github.com/kumparan/cacher/issues/17))
+
 ### Other Improvements
-- update keeper test
-- update github workflows
-- update keeper test to pass linter
-- update golangci.yml
-- bump dependencies to resolve security issues
+- increment/decrement TTL
+- fix vulnerability
+- return decrement/increment updated value
+- bump dependencies to resolve security issues ([#59](https://github.com/kumparan/cacher/issues/59))
+- add readme
+- close failover conn
+- remove comment
+
+### Test Improvements
+- update tests
+
+
+<a name="v2.8.2"></a>
+## [v2.8.2] - 2025-08-28
+### Fixes
+- use pipeline without tx
+
+
+<a name="v2.8.1"></a>
+## [v2.8.1] - 2025-08-21
+### Other Improvements
+- downgrade go-redis version to v9.11.0 ([#61](https://github.com/kumparan/cacher/issues/61))
+
+
+<a name="v2.8.0"></a>
+## [v2.8.0] - 2025-08-19
+### Code Improvements
+- refactor v2, update go 1.18 and goredis v8
+
+### Fixes
+- fix acquirelock on GetHashMemberOrLock and upgrade go 1.20 ([#54](https://github.com/kumparan/cacher/issues/54))
+- remove close pipeline ([#50](https://github.com/kumparan/cacher/issues/50))
+- fix get multi hashmembers ([#47](https://github.com/kumparan/cacher/issues/47))
+
+### New Features
+- store multi hash member ([#42](https://github.com/kumparan/cacher/issues/42))
+- upgrade to support Redis 7 ([#45](https://github.com/kumparan/cacher/issues/45))
+- add SafeUnlock to V2 ([#31](https://github.com/kumparan/cacher/issues/31))
+- add GetMultiHashMember using redis pipeline ([#30](https://github.com/kumparan/cacher/issues/30))
+- add persist implementation ([#25](https://github.com/kumparan/cacher/issues/25))
+- lock on empty cache
+- add test on v2
+
+### Other Improvements
+- update go version and dependencies ([#60](https://github.com/kumparan/cacher/issues/60))
+
+
+<a name="v1.20.0"></a>
+## [v1.20.0] - 2025-08-01
+### Other Improvements
+- bump dependencies to resolve security issues ([#59](https://github.com/kumparan/cacher/issues/59))
 
 
 <a name="v1.19.0"></a>
@@ -593,7 +680,11 @@
 <a name="v1.0.0"></a>
 ## v1.0.0 - 2019-04-01
 
-[Unreleased]: https://github.com/kumparan/cacher/compare/v1.20.0...HEAD
+[Unreleased]: https://github.com/kumparan/cacher/compare/v1.21.0...HEAD
+[v1.21.0]: https://github.com/kumparan/cacher/compare/v2.8.2...v1.21.0
+[v2.8.2]: https://github.com/kumparan/cacher/compare/v2.8.1...v2.8.2
+[v2.8.1]: https://github.com/kumparan/cacher/compare/v2.8.0...v2.8.1
+[v2.8.0]: https://github.com/kumparan/cacher/compare/v1.20.0...v2.8.0
 [v1.20.0]: https://github.com/kumparan/cacher/compare/v1.19.0...v1.20.0
 [v1.19.0]: https://github.com/kumparan/cacher/compare/v1.18.0...v1.19.0
 [v1.18.0]: https://github.com/kumparan/cacher/compare/v2.7.2...v1.18.0
