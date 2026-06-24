@@ -52,10 +52,10 @@ type (
 		ExpireMulti(map[string]time.Duration) error
 		Purge(string) error
 		DeleteByKeys([]string) error
-		IncreaseCachedValueByOne(key string) error
+		IncreaseCachedValueByOne(key string, ttl time.Duration) (int64, error)
 
-		IncreaseValueBy(key string, increaseBy int64) error
-		DecreaseValueBy(key string, decreaseBy int64) error
+		IncreaseValueBy(key string, increaseBy int64, ttl time.Duration) (int64, error)
+		DecreaseValueBy(key string, decreaseBy int64, ttl time.Duration) (int64, error)
 
 		AcquireLock(string) (*redsync.Mutex, error)
 		SetDefaultTTL(time.Duration)
@@ -652,9 +652,9 @@ func (k *keeper) Purge(matchString string) error {
 
 // IncreaseCachedValueByOne will increment the number stored at key by one.
 // If the key does not exist, it is set to 0 before performing the operation
-func (k *keeper) IncreaseCachedValueByOne(key string) error {
+func (k *keeper) IncreaseCachedValueByOne(key string, ttl time.Duration) (int64, error) {
 	if k.disableCaching {
-		return nil
+		return 0, nil
 	}
 
 	client := k.connPool.Get()
@@ -662,15 +662,44 @@ func (k *keeper) IncreaseCachedValueByOne(key string) error {
 		_ = client.Close()
 	}()
 
-	_, err := client.Do("INCR", key)
-	return err
+	err := client.Send("MULTI")
+	if err != nil {
+		logrus.Error(err)
+		return 0, err
+	}
+
+	err = client.Send("INCR", key)
+	if err != nil {
+		logrus.Error(err)
+		return 0, err
+	}
+
+	if ttl <= 0 {
+		ttl = k.defaultTTL
+	}
+
+	err = client.Send("EXPIRE", key, ttl.Seconds(), "NX")
+	if err != nil {
+		logrus.Error(err)
+		return 0, err
+	}
+
+	reply, err := client.Do("EXEC")
+	if err != nil {
+		logrus.Error(err)
+		return 0, err
+	}
+
+	replies := reply.([]interface{})
+
+	return replies[0].(int64), err
 }
 
 // IncreaseValueBy will increment the value by given integer.
 // If the key does not exist, it is set to 0 before performing the operation
-func (k *keeper) IncreaseValueBy(key string, incrBy int64) error {
+func (k *keeper) IncreaseValueBy(key string, incrBy int64, ttl time.Duration) (int64, error) {
 	if k.disableCaching {
-		return nil
+		return 0, nil
 	}
 
 	client := k.connPool.Get()
@@ -678,15 +707,44 @@ func (k *keeper) IncreaseValueBy(key string, incrBy int64) error {
 		_ = client.Close()
 	}()
 
-	_, err := client.Do("INCRBY", key, incrBy)
-	return err
+	err := client.Send("MULTI")
+	if err != nil {
+		logrus.Error(err)
+		return 0, err
+	}
+
+	err = client.Send("INCRBY", key, incrBy)
+	if err != nil {
+		logrus.Error(err)
+		return 0, err
+	}
+
+	if ttl <= 0 {
+		ttl = k.defaultTTL
+	}
+
+	err = client.Send("EXPIRE", key, ttl.Seconds(), "NX")
+	if err != nil {
+		logrus.Error(err)
+		return 0, err
+	}
+
+	reply, err := client.Do("EXEC")
+	if err != nil {
+		logrus.Error(err)
+		return 0, err
+	}
+
+	replies := reply.([]interface{})
+
+	return replies[0].(int64), err
 }
 
 // DecreaseValueBy will decrement the value by given integer.
 // If the key does not exist, it is set to 0 before performing the operation
-func (k *keeper) DecreaseValueBy(key string, decrBy int64) error {
+func (k *keeper) DecreaseValueBy(key string, decrBy int64, ttl time.Duration) (int64, error) {
 	if k.disableCaching {
-		return nil
+		return 0, nil
 	}
 
 	client := k.connPool.Get()
@@ -694,8 +752,37 @@ func (k *keeper) DecreaseValueBy(key string, decrBy int64) error {
 		_ = client.Close()
 	}()
 
-	_, err := client.Do("DECRBY", key, decrBy)
-	return err
+	err := client.Send("MULTI")
+	if err != nil {
+		logrus.Error(err)
+		return 0, err
+	}
+
+	err = client.Send("DECRBY", key, decrBy)
+	if err != nil {
+		logrus.Error(err)
+		return 0, err
+	}
+
+	if ttl <= 0 {
+		ttl = k.defaultTTL
+	}
+
+	err = client.Send("EXPIRE", key, ttl.Seconds(), "NX")
+	if err != nil {
+		logrus.Error(err)
+		return 0, err
+	}
+
+	reply, err := client.Do("EXEC")
+	if err != nil {
+		logrus.Error(err)
+		return 0, err
+	}
+
+	replies := reply.([]interface{})
+
+	return replies[0].(int64), err
 }
 
 // AcquireLock :nodoc:
