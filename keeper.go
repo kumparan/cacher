@@ -23,7 +23,7 @@ const (
 	defaultTTL                  = 10 * time.Second
 	defaultNilTTL               = 5 * time.Minute
 	defaultLockDuration         = 1 * time.Minute
-	defaultWaitTime             = 15 * time.Second
+	defaultWaitTime             = 5 * time.Second
 	defaultMaxCacheTTL          = 48 * time.Hour
 	defaultMinCacheTTLThreshold = 5 * time.Second
 	defaultLockTries            = 1
@@ -427,33 +427,22 @@ func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []
 		go k.acquireLockOrGetValueThroughChan(key, mutexCh, itemCh, errCh)
 	}
 
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		var errs *multierror.Error
-		counter := 0
-		for {
-			select {
-			case i := <-itemCh:
-				cachedItemsBuf[i.Key] = i.Item
-				counter++
-			case caseErr := <-errCh:
-				err = multierror.Append(errs, caseErr)
-				counter++
-			case m := <-mutexCh:
-				mutexesBuf[m.Key] = m.Mutex
-				counter++
-			default:
-				if counter == len(keysToLock) {
-					err = errs.ErrorOrNil()
-					return
-				}
-			}
+	var errs *multierror.Error
+	counter := 0
+	for counter < len(keysToLock) {
+		select {
+		case i := <-itemCh:
+			cachedItemsBuf[i.Key] = i.Item
+			counter++
+		case caseErr := <-errCh:
+			errs = multierror.Append(errs, caseErr)
+			counter++
+		case m := <-mutexCh:
+			mutexesBuf[m.Key] = m.Mutex
+			counter++
 		}
-	}()
-	wg.Wait()
-
+	}
+	err = errs.ErrorOrNil()
 	for _, k := range keys {
 		cachedItems = append(cachedItems, cachedItemsBuf[k])
 		if m, ok := mutexesBuf[k]; ok {
@@ -480,18 +469,19 @@ func (k *keeper) acquireLockOrGetValueThroughChan(key string, mutexCh chan<- mut
 
 		if !k.isLocked(key) {
 			cachedItem, err := k.Get(key)
-			if err != nil {
-				if err == ErrKeyNotExist {
-					mutex, err = k.AcquireLock(key)
-					if err == nil {
-						mutexCh <- mutexWithKey{Mutex: mutex, Key: key}
-						return
-					}
-					goto Wait
-				}
+			switch {
+			case err != nil:
 				errCh <- &errorWithKey{key: key, innerError: err}
 				return
+			case cachedItem == nil:
+				mutex, err = k.AcquireLock(key)
+				if err == nil {
+					mutexCh <- mutexWithKey{Mutex: mutex, Key: key}
+					return
+				}
+				goto Wait
 			}
+
 			itemCh <- itemWithKey{Item: cachedItem, Key: key}
 			return
 		}

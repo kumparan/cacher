@@ -17,7 +17,14 @@ import (
 func SafeUnlock(mutexes ...*redsync.Mutex) {
 	for _, m := range mutexes {
 		if m != nil {
-			_, _ = m.Unlock()
+			unlocked, err := m.Unlock()
+			switch {
+			case err != nil:
+				logrus.Error("failed to unlock mutex:", err)
+				continue
+			case !unlocked:
+				logrus.Error("unlock didn't succeed")
+			}
 		}
 	}
 }
