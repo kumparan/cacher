@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jpillora/backoff"
+
 	"github.com/kumparan/go-utils"
 	"github.com/sirupsen/logrus"
 
@@ -15,18 +17,59 @@ import (
 
 // SafeUnlock safely unlock mutex
 func SafeUnlock(mutexes ...*redsync.Mutex) {
+	retryables := make([]*redsync.Mutex, 0)
 	for _, m := range mutexes {
-		if m != nil {
-			unlocked, err := m.Unlock()
-			switch {
-			case err != nil:
-				logrus.Error("failed to unlock mutex:", err)
-				continue
-			case !unlocked:
-				logrus.Error("unlock didn't succeed")
-			}
+		if m == nil {
+			continue
 		}
+		unlocked, err := m.Unlock()
+		switch {
+		case unlocked:
+			continue
+		case err != nil:
+			logrus.Error("failed to unlock mutex:", err)
+		default:
+			logrus.Warn("mutex unlock didn't succeed")
+		}
+		retryables = append(retryables, m)
 	}
+
+	if len(retryables) > 0 {
+		return
+	}
+
+	go func() {
+		start := time.Now()
+		b := &backoff.Backoff{
+			Min:    defaultBackoffMinDurationForUnlockAttempt,
+			Max:    defaultBackoffMaxDurationForUnlockAttempt,
+			Jitter: true,
+		}
+		for len(retryables) > 0 {
+			fails := make([]*redsync.Mutex, 0)
+			for _, m := range retryables {
+				if m == nil {
+					continue
+				}
+				unlocked, err := m.Unlock()
+				switch {
+				case unlocked:
+					continue
+				case err != nil:
+					logrus.Error("failed to unlock mutex:", err)
+				default:
+					logrus.Warn("mutex unlock didn't succeed")
+				}
+				fails = append(fails, m)
+			}
+			retryables = fails
+			if time.Since(start) > defaultUnlockMaxRetryDuration {
+				logrus.Error("max duration reached for unlock retries")
+				return
+			}
+			time.Sleep(b.Duration())
+		}
+	}()
 }
 
 // ParseCacheResultToPointerObject parse cache result to any object you want

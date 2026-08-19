@@ -1,7 +1,9 @@
 package cacher
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -1416,6 +1418,518 @@ func TestGetMultipleOrLock(t *testing.T) {
 		for _, key := range keys {
 			assert.LessOrEqual(t, m.TTL(key), defaultTTL*time.Duration(math.Pow(float64(2), float64(4))))
 		}
+	})
+}
+
+func TestGetMultipleOrLoad(t *testing.T) {
+	t.Run("returns cached values without calling loader", func(t *testing.T) {
+		k := NewKeeper()
+
+		m, err := miniredis.Run()
+		require.NoError(t, err)
+		defer m.Close()
+
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+
+		require.NoError(t, m.Set("key-1", `{"id":1}`))
+		require.NoError(t, m.Set("key-2", `{"id":2}`))
+
+		loaderCalled := false
+
+		res, err := GetMultipleOrLoad(
+			context.Background(),
+			k,
+			[]KeyIdentifier[int64]{
+				{Key: "key-1", Identifier: 1},
+				{Key: "key-2", Identifier: 2},
+			},
+			func(ctx context.Context, identifiers []int64) (map[string][]byte, error) {
+				loaderCalled = true
+				return nil, nil
+			},
+		)
+
+		require.NoError(t, err)
+		assert.False(t, loaderCalled)
+		assert.Equal(t, []any{
+			[]byte(`{"id":1}`),
+			[]byte(`{"id":2}`),
+		}, res)
+	})
+
+	t.Run("loads cache misses and stores values", func(t *testing.T) {
+		k := NewKeeper()
+
+		m, err := miniredis.Run()
+		require.NoError(t, err)
+		defer m.Close()
+
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+
+		var loadedIdentifiers []int64
+
+		res, err := GetMultipleOrLoad(
+			context.Background(),
+			k,
+			[]KeyIdentifier[int64]{
+				{Key: "key-1", Identifier: 1},
+				{Key: "key-2", Identifier: 2},
+			},
+			func(ctx context.Context, identifiers []int64) (map[string][]byte, error) {
+				loadedIdentifiers = append(loadedIdentifiers, identifiers...)
+
+				return map[string][]byte{
+					"key-1": []byte(`{"id":1}`),
+					"key-2": []byte(`{"id":2}`),
+				}, nil
+			},
+		)
+
+		require.NoError(t, err)
+
+		assert.Equal(t, []int64{1, 2}, loadedIdentifiers)
+		assert.Equal(t, []any{
+			[]byte(`{"id":1}`),
+			[]byte(`{"id":2}`),
+		}, res)
+
+		cached1, err := k.Get("key-1")
+		require.NoError(t, err)
+		assert.Equal(t, []byte(`{"id":1}`), cached1)
+
+		cached2, err := k.Get("key-2")
+		require.NoError(t, err)
+		assert.Equal(t, []byte(`{"id":2}`), cached2)
+
+		// Locks must have been released.
+		assert.False(t, m.Exists("lock:key-1"))
+		assert.False(t, m.Exists("lock:key-2"))
+	})
+
+	t.Run("loads only missing values", func(t *testing.T) {
+		k := NewKeeper()
+
+		m, err := miniredis.Run()
+		require.NoError(t, err)
+		defer m.Close()
+
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+
+		require.NoError(t, m.Set("key-1", `{"id":1}`))
+
+		var loadedIdentifiers []int64
+
+		res, err := GetMultipleOrLoad(
+			context.Background(),
+			k,
+			[]KeyIdentifier[int64]{
+				{Key: "key-1", Identifier: 1},
+				{Key: "key-2", Identifier: 2},
+				{Key: "key-3", Identifier: 3},
+			},
+			func(ctx context.Context, identifiers []int64) (map[string][]byte, error) {
+				loadedIdentifiers = append(loadedIdentifiers, identifiers...)
+
+				return map[string][]byte{
+					"key-2": []byte(`{"id":2}`),
+					"key-3": []byte(`{"id":3}`),
+				}, nil
+			},
+		)
+
+		require.NoError(t, err)
+
+		assert.Equal(t, []int64{2, 3}, loadedIdentifiers)
+
+		assert.Equal(t, []any{
+			[]byte(`{"id":1}`),
+			[]byte(`{"id":2}`),
+			[]byte(`{"id":3}`),
+		}, res)
+	})
+
+	t.Run("supports string identifier", func(t *testing.T) {
+		k := NewKeeper()
+
+		m, err := miniredis.Run()
+		require.NoError(t, err)
+		defer m.Close()
+
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+
+		var loadedIdentifiers []string
+
+		res, err := GetMultipleOrLoad(
+			context.Background(),
+			k,
+			[]KeyIdentifier[string]{
+				{Key: "user:abc", Identifier: "abc"},
+				{Key: "user:def", Identifier: "def"},
+			},
+			func(ctx context.Context, identifiers []string) (map[string][]byte, error) {
+				loadedIdentifiers = append(loadedIdentifiers, identifiers...)
+
+				return map[string][]byte{
+					"user:abc": []byte(`{"id":"abc"}`),
+					"user:def": []byte(`{"id":"def"}`),
+				}, nil
+			},
+		)
+
+		require.NoError(t, err)
+		assert.Equal(t, []string{"abc", "def"}, loadedIdentifiers)
+
+		assert.Equal(t, []any{
+			[]byte(`{"id":"abc"}`),
+			[]byte(`{"id":"def"}`),
+		}, res)
+	})
+
+	t.Run("preserves original item order", func(t *testing.T) {
+		k := NewKeeper()
+
+		m, err := miniredis.Run()
+		require.NoError(t, err)
+		defer m.Close()
+
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+
+		res, err := GetMultipleOrLoad(
+			context.Background(),
+			k,
+			[]KeyIdentifier[int64]{
+				{Key: "key-3", Identifier: 3},
+				{Key: "key-1", Identifier: 1},
+				{Key: "key-2", Identifier: 2},
+			},
+			func(ctx context.Context, identifiers []int64) (map[string][]byte, error) {
+				return map[string][]byte{
+					"key-1": []byte("one"),
+					"key-2": []byte("two"),
+					"key-3": []byte("three"),
+				}, nil
+			},
+		)
+
+		require.NoError(t, err)
+
+		assert.Equal(t, []any{
+			[]byte("three"),
+			[]byte("one"),
+			[]byte("two"),
+		}, res)
+	})
+
+	t.Run("supports duplicate keys and returns result for every item", func(t *testing.T) {
+		k := NewKeeper()
+
+		m, err := miniredis.Run()
+		require.NoError(t, err)
+		defer m.Close()
+
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+
+		loaderCalls := 0
+		var loadedIdentifiers []int64
+
+		res, err := GetMultipleOrLoad(
+			context.Background(),
+			k,
+			[]KeyIdentifier[int64]{
+				{Key: "key-1", Identifier: 1},
+				{Key: "key-1", Identifier: 1},
+				{Key: "key-2", Identifier: 2},
+			},
+			func(ctx context.Context, identifiers []int64) (map[string][]byte, error) {
+				loaderCalls++
+				loadedIdentifiers = append(loadedIdentifiers, identifiers...)
+
+				return map[string][]byte{
+					"key-1": []byte("one"),
+					"key-2": []byte("two"),
+				}, nil
+			},
+		)
+
+		require.NoError(t, err)
+
+		assert.Equal(t, 1, loaderCalls)
+		assert.ElementsMatch(t, []int64{1, 2}, loadedIdentifiers)
+
+		assert.Equal(t, []any{
+			[]byte("one"),
+			[]byte("one"),
+			[]byte("two"),
+		}, res)
+	})
+
+	t.Run("stores nil when loader does not return a key", func(t *testing.T) {
+		k := NewKeeper()
+
+		m, err := miniredis.Run()
+		require.NoError(t, err)
+		defer m.Close()
+
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+
+		res, err := GetMultipleOrLoad(
+			context.Background(),
+			k,
+			[]KeyIdentifier[int64]{
+				{Key: "key-1", Identifier: 1},
+				{Key: "key-2", Identifier: 2},
+			},
+			func(ctx context.Context, identifiers []int64) (map[string][]byte, error) {
+				return map[string][]byte{
+					"key-1": []byte(`{"id":1}`),
+
+					// key-2 deliberately absent
+				}, nil
+			},
+		)
+
+		require.NoError(t, err)
+
+		assert.Equal(t, []any{
+			[]byte(`{"id":1}`),
+			nilValue,
+		}, res)
+
+		cached, err := k.Get("key-2")
+		require.NoError(t, err)
+		assert.Equal(t, nilValue, cached)
+	})
+
+	t.Run("returns loader error and releases acquired locks", func(t *testing.T) {
+		k := NewKeeper()
+
+		m, err := miniredis.Run()
+		require.NoError(t, err)
+		defer m.Close()
+
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+
+		expectedErr := errors.New("database error")
+
+		res, err := GetMultipleOrLoad(
+			context.Background(),
+			k,
+			[]KeyIdentifier[int64]{
+				{Key: "key-1", Identifier: 1},
+				{Key: "key-2", Identifier: 2},
+			},
+			func(ctx context.Context, identifiers []int64) (map[string][]byte, error) {
+				return nil, expectedErr
+			},
+		)
+
+		assert.Nil(t, res)
+		assert.ErrorIs(t, err, expectedErr)
+
+		assert.False(t, m.Exists("lock:key-1"))
+		assert.False(t, m.Exists("lock:key-2"))
+	})
+
+	t.Run("waits for another owner to publish cache without calling loader", func(t *testing.T) {
+		k := NewKeeper()
+
+		m, err := miniredis.Run()
+		require.NoError(t, err)
+		defer m.Close()
+
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+
+		key := "key-1"
+
+		// Simulate another request owning the cache-fill responsibility.
+		mu, err := k.AcquireLock(key)
+		require.NoError(t, err)
+
+		loaderCalled := false
+
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+
+			err := k.StoreMultiWithoutBlocking([]Item{
+				NewItem(key, []byte(`{"id":1}`)),
+			})
+			require.NoError(t, err)
+
+			_, err = mu.Unlock()
+			require.NoError(t, err)
+		}()
+
+		ctx, cancel := context.WithTimeout(
+			context.Background(),
+			2*time.Second,
+		)
+		defer cancel()
+
+		res, err := GetMultipleOrLoad(
+			ctx,
+			k,
+			[]KeyIdentifier[int64]{
+				{Key: key, Identifier: 1},
+			},
+			func(ctx context.Context, identifiers []int64) (map[string][]byte, error) {
+				loaderCalled = true
+				return nil, nil
+			},
+		)
+
+		require.NoError(t, err)
+		assert.False(t, loaderCalled)
+
+		assert.Equal(t, []any{
+			[]byte(`{"id":1}`),
+		}, res)
+	})
+
+	t.Run("takes over loading after another owner releases without publishing", func(t *testing.T) {
+		k := NewKeeper()
+
+		m, err := miniredis.Run()
+		require.NoError(t, err)
+		defer m.Close()
+
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+
+		key := "key-1"
+
+		mu, err := k.AcquireLock(key)
+		require.NoError(t, err)
+
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+
+			// Simulate previous owner failing before filling cache.
+			_, err := mu.Unlock()
+			require.NoError(t, err)
+		}()
+
+		ctx, cancel := context.WithTimeout(
+			context.Background(),
+			2*time.Second,
+		)
+		defer cancel()
+
+		loaderCalls := 0
+
+		res, err := GetMultipleOrLoad(
+			ctx,
+			k,
+			[]KeyIdentifier[int64]{
+				{Key: key, Identifier: 1},
+			},
+			func(ctx context.Context, identifiers []int64) (map[string][]byte, error) {
+				loaderCalls++
+
+				assert.Equal(t, []int64{1}, identifiers)
+
+				return map[string][]byte{
+					key: []byte(`{"id":1}`),
+				}, nil
+			},
+		)
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, loaderCalls)
+
+		assert.Equal(t, []any{
+			[]byte(`{"id":1}`),
+		}, res)
+	})
+
+	t.Run("returns context deadline when another owner keeps the lock", func(t *testing.T) {
+		k := NewKeeper()
+
+		m, err := miniredis.Run()
+		require.NoError(t, err)
+		defer m.Close()
+
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+
+		key := "key-1"
+
+		mu, err := k.AcquireLock(key)
+		require.NoError(t, err)
+		defer func() {
+			_, _ = mu.Unlock()
+		}()
+
+		ctx, cancel := context.WithTimeout(
+			context.Background(),
+			100*time.Millisecond,
+		)
+		defer cancel()
+
+		loaderCalled := false
+
+		res, err := GetMultipleOrLoad(
+			ctx,
+			k,
+			[]KeyIdentifier[int64]{
+				{Key: key, Identifier: 1},
+			},
+			func(ctx context.Context, identifiers []int64) (map[string][]byte, error) {
+				loaderCalled = true
+				return nil, nil
+			},
+		)
+
+		assert.Nil(t, res)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.False(t, loaderCalled)
+	})
+
+	t.Run("empty items returns empty result without calling loader", func(t *testing.T) {
+		k := NewKeeper()
+
+		m, err := miniredis.Run()
+		require.NoError(t, err)
+		defer m.Close()
+
+		r := newRedisConn(m.Addr())
+		k.SetConnectionPool(r)
+		k.SetLockConnectionPool(r)
+
+		loaderCalled := false
+
+		res, err := GetMultipleOrLoad(
+			context.Background(),
+			k,
+			[]KeyIdentifier[int64]{},
+			func(ctx context.Context, identifiers []int64) (map[string][]byte, error) {
+				loaderCalled = true
+				return nil, nil
+			},
+		)
+
+		require.NoError(t, err)
+		assert.Empty(t, res)
+		assert.False(t, loaderCalled)
 	})
 }
 
