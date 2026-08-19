@@ -1,7 +1,16 @@
 # cacher
 
+<a name="v1.22.0"></a>
+## [v1.22.0] - 2026-08-18
+### Fixes
+- fix get multi lock mechanism
+
+### New Features
+- create GetMultipleOrLoad, deprecate GetMultipleOrLock
+
+
 <a name="v1.21.0"></a>
-## [v1.21.0] - 2026-06-18
+## [v1.21.0] - 2026-06-24
 ### Code Improvements
 - update go.mod libraries
 - rename rep to reply
@@ -44,9 +53,7 @@
 - remove garybird redis ([#17](https://github.com/kumparan/cacher/issues/17))
 
 ### Other Improvements
-- increment/decrement TTL
-- fix vulnerability
-- return decrement/increment updated value
+- return decrement/increment updated value and set TTL ([#63](https://github.com/kumparan/cacher/issues/63))
 - bump dependencies to resolve security issues ([#59](https://github.com/kumparan/cacher/issues/59))
 - add readme
 - close failover conn
@@ -680,7 +687,8 @@
 <a name="v1.0.0"></a>
 ## v1.0.0 - 2019-04-01
 
-[Unreleased]: https://github.com/kumparan/cacher/compare/v1.21.0...HEAD
+[Unreleased]: https://github.com/kumparan/cacher/compare/v1.22.0...HEAD
+[v1.22.0]: https://github.com/kumparan/cacher/compare/v1.21.0...v1.22.0
 [v1.21.0]: https://github.com/kumparan/cacher/compare/v2.8.2...v1.21.0
 [v2.8.2]: https://github.com/kumparan/cacher/compare/v2.8.1...v2.8.2
 [v2.8.1]: https://github.com/kumparan/cacher/compare/v2.8.0...v2.8.1

@@ -1,10 +1,10 @@
 package cacher
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/hashicorp/go-multierror"
@@ -20,15 +20,20 @@ import (
 
 const (
 	// Override these when constructing the cache keeper
-	defaultTTL                  = 10 * time.Second
-	defaultNilTTL               = 5 * time.Minute
-	defaultLockDuration         = 1 * time.Minute
-	defaultWaitTime             = 5 * time.Second
-	defaultMaxCacheTTL          = 48 * time.Hour
-	defaultMinCacheTTLThreshold = 5 * time.Second
-	defaultLockTries            = 1
-	defaultCacheHitThreshold    = 10
-	defaultMultiplierFactor     = 2
+	defaultTTL                                = 10 * time.Second
+	defaultNilTTL                             = 5 * time.Minute
+	defaultLockDuration                       = 5 * time.Second
+	defaultUnlockMaxRetryDuration             = 30 * time.Second
+	defaultWaitTime                           = 5 * time.Second
+	defaultMaxCacheTTL                        = 48 * time.Hour
+	defaultMinCacheTTLThreshold               = 5 * time.Second
+	defaultLockTries                          = 1
+	defaultCacheHitThreshold                  = 10
+	defaultMultiplierFactor                   = 2
+	defaultBackoffMinDurationForUnlockAttempt = 10 * time.Millisecond
+	defaultBackoffMaxDurationForUnlockAttempt = 100 * time.Millisecond
+	defaultBackoffMinDurationForLockAttempt   = 20 * time.Millisecond
+	defaultBackoffMaxDurationForLockAttempt   = 200 * time.Millisecond
 )
 
 var nilValue = []byte("null")
@@ -139,6 +144,12 @@ type (
 	errorWithKey struct {
 		key        string
 		innerError error
+	}
+
+	// KeyIdentifier pairs a cache key with the identifier its loader needs to fetch it.
+	KeyIdentifier[T any] struct {
+		Key        string
+		Identifier T
 	}
 )
 
@@ -275,8 +286,8 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 	start := time.Now()
 	for {
 		b := &backoff.Backoff{
-			Min:    20 * time.Millisecond,
-			Max:    200 * time.Millisecond,
+			Min:    defaultBackoffMinDurationForLockAttempt,
+			Max:    defaultBackoffMaxDurationForLockAttempt,
 			Jitter: true,
 		}
 
@@ -364,10 +375,10 @@ func (k *keeper) GetOrSet(key string, fn GetterFn, opts ...func(Item)) (res []by
 	return cachedValue.([]byte), nil
 }
 
-// GetMultipleOrLock get multiple and apply locks for non-existing keys on redis.
+// GetMultipleOrLock DEPRECATED because of deadlock issue, use GetMultipleOrLoad
+// get multiple and apply locks for non-existing keys on redis.
 // Returned cached items will be in order based on keys provided, if the value for some key is not exist then it will be marked as nil on
 // returned cached items slice.
-// TODO: refactor this when you are bored
 func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []*redsync.Mutex, err error) {
 	if k.disableCaching {
 		for range keys {
@@ -433,14 +444,12 @@ func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []
 		select {
 		case i := <-itemCh:
 			cachedItemsBuf[i.Key] = i.Item
-			counter++
 		case caseErr := <-errCh:
 			errs = multierror.Append(errs, caseErr)
-			counter++
 		case m := <-mutexCh:
 			mutexesBuf[m.Key] = m.Mutex
-			counter++
 		}
+		counter++
 	}
 	err = errs.ErrorOrNil()
 	for _, k := range keys {
@@ -453,6 +462,123 @@ func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []
 	return
 }
 
+// GetMultipleOrLoad returns the cached value for every item, in the same order as items.
+// Keys that miss are locked and loaded via loader; if another process already holds the
+// lock, this waits for that process to fill the cache instead of loading twice.
+//
+// loader receives the identifiers of the keys it must load, and must return a map keyed
+// by cache key holding already-serialized values. Keys absent from that map are cached
+// as JSON null.
+//
+// ctx should carry a deadline: waiting on another process's lock has no other bound.
+func GetMultipleOrLoad[T any](
+	ctx context.Context,
+	k Keeper,
+	items []KeyIdentifier[T],
+	loader func(ctx context.Context, identifiers []T) (map[string][]byte, error),
+) ([]any, error) {
+	identifierByKey := make(map[string]T, len(items))
+	pending := make([]string, 0, len(items))
+	for _, it := range items {
+		if _, seen := identifierByKey[it.Key]; seen {
+			continue
+		}
+		identifierByKey[it.Key] = it.Identifier
+		pending = append(pending, it.Key)
+	}
+
+	result := make(map[string]any, len(pending))
+	bo := &backoff.Backoff{
+		Min:    defaultBackoffMinDurationForLockAttempt,
+		Max:    defaultBackoffMaxDurationForLockAttempt,
+		Jitter: true,
+	}
+	loaderCallCount := 0
+	defer func() {
+		if loaderCallCount > 1 {
+			logrus.Warn("loader called more than once:", loaderCallCount)
+		}
+	}()
+	for len(pending) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		// check/recheck cache
+		missing := make([]string, 0, len(pending))
+		for _, key := range pending {
+			v, err := k.Get(key)
+			if err != nil {
+				logrus.Error(err)
+				return nil, err
+			}
+			if v != nil {
+				result[key] = v
+				continue
+			}
+			missing = append(missing, key)
+		}
+		if len(missing) == 0 {
+			break
+		}
+
+		// lock what we can; leave the rest to whoever holds the lock
+		locked := make([]string, 0, len(missing))
+		mutexes := make([]*redsync.Mutex, 0, len(missing))
+		waiting := make([]string, 0, len(missing))
+
+		for _, key := range missing {
+			mu, err := k.AcquireLock(key)
+			if err != nil {
+				waiting = append(waiting, key)
+				continue
+			}
+			locked = append(locked, key)
+			mutexes = append(mutexes, mu)
+		}
+
+		if len(locked) > 0 {
+			loaderCallCount++
+			values, err := loader(ctx, utils.MapValuesToOrderedSlice(identifierByKey, locked))
+			if err != nil {
+				SafeUnlock(mutexes...)
+				return nil, err
+			}
+
+			cacheItems := make([]Item, 0, len(locked))
+			for _, key := range locked {
+				value, found := values[key]
+				if !found {
+					value = nilValue
+				}
+				cacheItems = append(cacheItems, NewItem(key, value))
+				result[key] = value
+			}
+			if err := k.StoreMultiWithoutBlocking(cacheItems); err != nil {
+				logrus.Error(err)
+			}
+			SafeUnlock(mutexes...)
+		}
+
+		pending = waiting
+		if len(pending) == 0 {
+			break
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(bo.Duration()):
+		}
+	}
+
+	res := make([]any, len(items))
+	for i, it := range items {
+		res[i] = result[it.Key]
+	}
+	return res, nil
+}
+
 func (k *keeper) acquireLockOrGetValueThroughChan(key string, mutexCh chan<- mutexWithKey, itemCh chan<- itemWithKey, errCh chan<- error) {
 	mutex, err := k.AcquireLock(key)
 	if err == nil {
@@ -463,8 +589,8 @@ func (k *keeper) acquireLockOrGetValueThroughChan(key string, mutexCh chan<- mut
 	for {
 		b := &backoff.Backoff{
 			Jitter: true,
-			Min:    20 * time.Millisecond,
-			Max:    200 * time.Millisecond,
+			Min:    defaultBackoffMinDurationForLockAttempt,
+			Max:    defaultBackoffMaxDurationForLockAttempt,
 		}
 
 		if !k.isLocked(key) {
@@ -507,8 +633,8 @@ func (k *keeper) acquireLockOrHGetValueThroughChan(identifier string, key string
 	for {
 		b := &backoff.Backoff{
 			Jitter: true,
-			Min:    20 * time.Millisecond,
-			Max:    200 * time.Millisecond,
+			Min:    defaultBackoffMinDurationForLockAttempt,
+			Max:    defaultBackoffMaxDurationForLockAttempt,
 		}
 
 		if !k.isLocked(key) {
@@ -1092,8 +1218,8 @@ func (k *keeper) GetHashMemberOrLock(identifier string, key string) (cachedItem 
 	start := time.Now()
 	for {
 		b := &backoff.Backoff{
-			Min:    20 * time.Millisecond,
-			Max:    200 * time.Millisecond,
+			Min:    defaultBackoffMinDurationForLockAttempt,
+			Max:    defaultBackoffMaxDurationForLockAttempt,
 			Jitter: true,
 		}
 
@@ -1202,32 +1328,20 @@ func (k *keeper) GetMultiHashMembersOrLock(identifiers []string, keys []string) 
 	}
 
 	// wait for lock or value
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		var errs *multierror.Error
-		counter := 0
-		for {
-			select {
-			case i := <-itemCh:
-				cachedItemsBuf[fmt.Sprintf("%s:%s", i.Identifier, i.Key)] = i.Item
-				counter++
-			case caseErr := <-errCh:
-				err = multierror.Append(errs, caseErr)
-				counter++
-			case m := <-mutexCh:
-				mutexesBuf[fmt.Sprintf("%s:%s", m.Identifier, m.Key)] = m.Mutex
-				counter++
-			default:
-				if counter == len(keyIndexesToLock) {
-					err = errs.ErrorOrNil()
-					return
-				}
-			}
+	var errs *multierror.Error
+	counter := 0
+	for counter < len(keyIndexesToLock) {
+		select {
+		case i := <-itemCh:
+			cachedItemsBuf[fmt.Sprintf("%s:%s", i.Identifier, i.Key)] = i.Item
+		case caseErr := <-errCh:
+			errs = multierror.Append(errs, caseErr)
+		case m := <-mutexCh:
+			mutexesBuf[fmt.Sprintf("%s:%s", m.Identifier, m.Key)] = m.Mutex
 		}
-	}()
-	wg.Wait()
+		counter++
+	}
+	err = errs.ErrorOrNil()
 	for i, id := range identifiers {
 		cachedItems = append(cachedItems, cachedItemsBuf[fmt.Sprintf("%s:%s", id, keys[i])])
 		if m, ok := mutexesBuf[fmt.Sprintf("%s:%s", id, keys[i])]; ok {
