@@ -1,7 +1,13 @@
 # cacher
 
+<a name="v1.23.0"></a>
+## [v1.23.0] - 2026-08-26
+### Fixes
+- handle disabledCache true in GetMultipleOrLoad
+
+
 <a name="v1.22.0"></a>
-## [v1.22.0] - 2026-08-18
+## [v1.22.0] - 2026-08-19
 ### Fixes
 - fix get multi lock mechanism
 
@@ -687,7 +693,8 @@
 <a name="v1.0.0"></a>
 ## v1.0.0 - 2019-04-01
 
-[Unreleased]: https://github.com/kumparan/cacher/compare/v1.22.0...HEAD
+[Unreleased]: https://github.com/kumparan/cacher/compare/v1.23.0...HEAD
+[v1.23.0]: https://github.com/kumparan/cacher/compare/v1.22.0...v1.23.0
 [v1.22.0]: https://github.com/kumparan/cacher/compare/v1.21.0...v1.22.0
 [v1.21.0]: https://github.com/kumparan/cacher/compare/v2.8.2...v1.21.0
 [v2.8.2]: https://github.com/kumparan/cacher/compare/v2.8.1...v2.8.2
