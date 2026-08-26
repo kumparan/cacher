@@ -71,6 +71,7 @@ type (
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
 		SetDisableCaching(bool)
+		IsCachingDisabled() bool
 		SetEnableDynamicTTL(bool)
 		SetMaxCacheTTL(time.Duration)
 		SetMinCacheTTLThreshold(time.Duration)
@@ -78,7 +79,6 @@ type (
 		SetMultiplierFactor(int64)
 
 		CheckKeyExist(string) (bool, error)
-		IsCachingDisabled() bool
 
 		// list
 		StoreRightList(string, any) error
