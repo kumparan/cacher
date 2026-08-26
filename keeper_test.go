@@ -79,6 +79,18 @@ func TestCheckKeyExist(t *testing.T) {
 	})
 }
 
+func TestIsCachingDisabled(t *testing.T) {
+	k := NewKeeper()
+
+	assert.False(t, k.IsCachingDisabled())
+
+	k.SetDisableCaching(true)
+	assert.True(t, k.IsCachingDisabled())
+
+	k.SetDisableCaching(false)
+	assert.False(t, k.IsCachingDisabled())
+}
+
 func TestGet(t *testing.T) {
 	// Initialize new cache keeper
 	k := NewKeeper()
@@ -1930,6 +1942,58 @@ func TestGetMultipleOrLoad(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, res)
 		assert.False(t, loaderCalled)
+	})
+
+	t.Run("caching disabled - calls loader directly", func(t *testing.T) {
+		k := NewKeeper()
+		k.SetDisableCaching(true)
+
+		loaderCalls := 0
+		res, err := GetMultipleOrLoad(
+			context.Background(),
+			k,
+			[]KeyIdentifier[int64]{
+				{Key: "key-1", Identifier: 1},
+				{Key: "key-2", Identifier: 2},
+			},
+			func(ctx context.Context, identifiers []int64) (map[string][]byte, error) {
+				loaderCalls++
+				assert.Equal(t, []int64{1, 2}, identifiers)
+
+				return map[string][]byte{
+					"key-1": []byte(`{"id":1}`),
+					"key-2": []byte(`{"id":2}`),
+				}, nil
+			},
+		)
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, loaderCalls)
+		assert.Equal(t, []any{
+			[]byte(`{"id":1}`),
+			[]byte(`{"id":2}`),
+		}, res)
+	})
+
+	t.Run("caching disabled - loader error", func(t *testing.T) {
+		k := NewKeeper()
+		k.SetDisableCaching(true)
+
+		expectedErr := errors.New("database error")
+
+		res, err := GetMultipleOrLoad(
+			context.Background(),
+			k,
+			[]KeyIdentifier[int64]{
+				{Key: "key-1", Identifier: 1},
+			},
+			func(ctx context.Context, identifiers []int64) (map[string][]byte, error) {
+				return nil, expectedErr
+			},
+		)
+
+		assert.Nil(t, res)
+		assert.ErrorIs(t, err, expectedErr)
 	})
 }
 

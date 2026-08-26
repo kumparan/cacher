@@ -71,6 +71,7 @@ type (
 		SetLockTries(int)
 		SetWaitTime(time.Duration)
 		SetDisableCaching(bool)
+		IsCachingDisabled() bool
 		SetEnableDynamicTTL(bool)
 		SetMaxCacheTTL(time.Duration)
 		SetMinCacheTTLThreshold(time.Duration)
@@ -238,6 +239,11 @@ func (k *keeper) SetWaitTime(d time.Duration) {
 // SetDisableCaching :nodoc:
 func (k *keeper) SetDisableCaching(b bool) {
 	k.disableCaching = b
+}
+
+// IsCachingDisabled returns whether caching is disabled or not
+func (k *keeper) IsCachingDisabled() bool {
+	return k.disableCaching
 }
 
 // SetEnableDynamicTTL :nodoc:
@@ -485,6 +491,23 @@ func GetMultipleOrLoad[T any](
 		}
 		identifierByKey[it.Key] = it.Identifier
 		pending = append(pending, it.Key)
+	}
+
+	// call the loader directly if caching is disabled
+	if k.IsCachingDisabled() {
+		values, err := loader(ctx, utils.MapValuesToOrderedSlice(identifierByKey, pending))
+		if err != nil {
+			return nil, err
+		}
+		res := make([]any, len(items))
+		for i, it := range items {
+			if v, found := values[it.Key]; found {
+				res[i] = v
+			} else {
+				res[i] = nilValue
+			}
+		}
+		return res, nil
 	}
 
 	result := make(map[string]any, len(pending))
