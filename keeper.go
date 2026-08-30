@@ -497,6 +497,7 @@ func GetMultipleOrLoad[T any](
 	if k.IsCachingDisabled() {
 		values, err := loader(ctx, utils.MapValuesToOrderedSlice(identifierByKey, pending))
 		if err != nil {
+			logrus.Error(err)
 			return nil, err
 		}
 		res := make([]any, len(items))
@@ -541,6 +542,7 @@ func GetMultipleOrLoad[T any](
 			}
 			missing = append(missing, key)
 		}
+		fmt.Println("CACHER COK, Missing:", len(missing))
 		if len(missing) == 0 {
 			break
 		}
