@@ -559,7 +559,7 @@ func GetMultipleOrLoad[T any](
 			locked = append(locked, key)
 			mutexes = append(mutexes, mu)
 		}
-
+		fmt.Println("CACHER COK, Locked:", len(locked))
 		if len(locked) > 0 {
 			loaderCallCount++
 			values, err := loader(ctx, utils.MapValuesToOrderedSlice(identifierByKey, locked))
@@ -577,6 +577,7 @@ func GetMultipleOrLoad[T any](
 				cacheItems = append(cacheItems, NewItem(key, value))
 				result[key] = value
 			}
+			fmt.Println("CACHER COK, stored:", len(cacheItems))
 			if err := k.StoreMultiWithoutBlocking(cacheItems); err != nil {
 				logrus.Error(err)
 			}
