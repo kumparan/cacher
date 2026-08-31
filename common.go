@@ -1,12 +1,12 @@
 package cacher
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/sync/errgroup"
 	"strconv"
 	"time"
-
-	"github.com/jpillora/backoff"
 
 	"github.com/kumparan/go-utils"
 	"github.com/sirupsen/logrus"
@@ -15,61 +15,64 @@ import (
 	"github.com/kumparan/redsync/v4"
 )
 
-// SafeUnlock safely unlock mutex
+const (
+	unlockMaxAttempts = 2
+	unlockTimeout     = 250 * time.Millisecond
+	unlockRetryDelay  = 20 * time.Millisecond
+	concurrencyLimit  = 10
+)
+
+// SafeUnlock unlock multiple mutexes concurrently and safely
+// when unlock fails, it means the lock is already expired or not exists anymore
+// when unlock got error, it will retry to unlock again until max attempts reached
 func SafeUnlock(mutexes ...*redsync.Mutex) {
-	retryables := make([]*redsync.Mutex, 0)
-	for _, m := range mutexes {
-		if m == nil {
+	eg := errgroup.Group{}
+	eg.SetLimit(concurrencyLimit)
+	for _, mutex := range mutexes {
+		if mutex == nil {
 			continue
 		}
-		unlocked, err := m.Unlock()
-		switch {
-		case unlocked:
-			continue
-		case err != nil:
-			logrus.Error("failed to unlock mutex:", err)
-		default:
-			logrus.Warn("mutex unlock didn't succeed")
-		}
-		retryables = append(retryables, m)
+
+		m := mutex
+		eg.Go(func() error {
+			for attempt := 1; attempt <= unlockMaxAttempts; attempt++ {
+				ctx, cancel := context.WithTimeout(
+					context.Background(),
+					unlockTimeout,
+				)
+
+				unlocked, err := m.UnlockContext(ctx)
+				cancel()
+
+				if err == nil {
+					if !unlocked {
+						logrus.WithFields(logrus.Fields{
+							"mutex":     m.Name(),
+							"remaining": time.Until(m.Until()),
+						}).Warn("mutex unlock didn't succeed")
+					}
+
+					return nil
+				}
+
+				logrus.WithFields(logrus.Fields{
+					"mutex":     m.Name(),
+					"attempt":   attempt,
+					"remaining": time.Until(m.Until()),
+				}).Error("failed to unlock mutex:", err)
+
+				if attempt == unlockMaxAttempts {
+					break
+				}
+
+				time.Sleep(unlockRetryDelay)
+			}
+
+			return nil
+		})
 	}
 
-	if len(retryables) > 0 {
-		return
-	}
-
-	go func() {
-		start := time.Now()
-		b := &backoff.Backoff{
-			Min:    defaultBackoffMinDurationForUnlockAttempt,
-			Max:    defaultBackoffMaxDurationForUnlockAttempt,
-			Jitter: true,
-		}
-		for len(retryables) > 0 {
-			fails := make([]*redsync.Mutex, 0)
-			for _, m := range retryables {
-				if m == nil {
-					continue
-				}
-				unlocked, err := m.Unlock()
-				switch {
-				case unlocked:
-					continue
-				case err != nil:
-					logrus.Error("failed to unlock mutex:", err)
-				default:
-					logrus.Warn("mutex unlock didn't succeed")
-				}
-				fails = append(fails, m)
-			}
-			retryables = fails
-			if time.Since(start) > defaultUnlockMaxRetryDuration {
-				logrus.Error("max duration reached for unlock retries")
-				return
-			}
-			time.Sleep(b.Duration())
-		}
-	}()
+	_ = eg.Wait()
 }
 
 // ParseCacheResultToPointerObject parse cache result to any object you want
