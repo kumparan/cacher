@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"golang.org/x/sync/errgroup"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/hashicorp/go-multierror"
 
@@ -36,7 +37,7 @@ const (
 	defaultBackoffMaxDurationForUnlockAttempt = 100 * time.Millisecond
 	defaultBackoffMinDurationForLockAttempt   = 20 * time.Millisecond
 	defaultBackoffMaxDurationForLockAttempt   = 200 * time.Millisecond
-	defaultRedisPoolMetricsInterval           = 10 * time.Second
+	defaultRedisPoolMetricsLoggerInterval     = 10 * time.Second
 )
 
 var nilValue = []byte("null")
@@ -674,7 +675,7 @@ func acquireLocksConcurrently(k Keeper, keysToLock []string) (mutexes []*redsync
 				mu.Lock()
 				waitingKeys = append(waitingKeys, key)
 				mu.Unlock()
-				return nil
+				return err
 			}
 			mu.Lock()
 			mutexes = append(mutexes, mutex)
@@ -1629,7 +1630,7 @@ func (k *keeper) StartPoolMetricsLogger(
 	interval time.Duration,
 ) {
 	if interval <= 0 {
-		interval = defaultRedisPoolMetricsInterval
+		interval = defaultRedisPoolMetricsLoggerInterval
 	}
 
 	previous := make(map[string]redisPoolSnapshot)
