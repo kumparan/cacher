@@ -1746,10 +1746,12 @@ func (k *keeper) logPoolMetrics(
 
 	waitCountDelta := int64(0)
 	waitDurationDelta := time.Duration(0)
+	avgWaitDuration := time.Duration(0)
 
 	if exists {
 		waitCountDelta = stats.WaitCount - prev.waitCount
 		waitDurationDelta = stats.WaitDuration - prev.waitDuration
+		avgWaitDuration = waitDurationDelta / time.Duration(waitCountDelta)
 	}
 
 	previous[poolName] = redisPoolSnapshot{
@@ -1758,12 +1760,13 @@ func (k *keeper) logPoolMetrics(
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"pool":                poolName,
-		"active_count":        stats.ActiveCount,
-		"idle_count":          stats.IdleCount,
-		"in_use":              stats.ActiveCount - stats.IdleCount,
-		"wait_count_delta":    waitCountDelta,
-		"wait_duration_delta": waitDurationDelta,
+		"pool":                   poolName,
+		"active_count":           stats.ActiveCount,
+		"idle_count":             stats.IdleCount,
+		"in_use":                 stats.ActiveCount - stats.IdleCount,
+		"wait_count_delta":       waitCountDelta,
+		"wait_duration_delta_ms": waitDurationDelta.Milliseconds(),
+		"avg_wait_duration_ms":   avgWaitDuration.Milliseconds(),
 	}).Info("redis connection pool stats")
 }
 
