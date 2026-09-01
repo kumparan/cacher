@@ -555,7 +555,7 @@ func (k *keeper) GetMultiple(keys []string) (map[string]any, error) {
 		return nil, err
 	}
 
-	k.extendCacheTTLMultiple(ttls)
+	k.applyDynamicTTLPolicy(ttls)
 
 	return result, nil
 }
@@ -1695,14 +1695,12 @@ func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
 	return int64(k.defaultTTL.Seconds())
 }
 
-// extendCacheTTLMultiple applies the dynamic TTL policy to a whole batch of
-// keys using two pipelined round trips, instead of the two per key that
-// extendCacheTTL costs.
-//
+// applyDynamicTTLPolicy applies the dynamic TTL policy to a whole batch of
+// keys using two pipelined round trips
 // Round trip one bumps every hit counter; round trip two extends only the keys
 // whose counter crossed the threshold.
-func (k *keeper) extendCacheTTLMultiple(items []keyTTL) {
-	if len(items) == 0 {
+func (k *keeper) applyDynamicTTLPolicy(items []keyTTL) {
+	if len(items) == 0 || !k.enableDynamicTTL {
 		return
 	}
 
