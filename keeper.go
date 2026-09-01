@@ -22,21 +22,18 @@ import (
 
 const (
 	// Override these when constructing the cache keeper
-	defaultTTL                                = 10 * time.Second
-	defaultNilTTL                             = 5 * time.Minute
-	defaultLockDuration                       = 5 * time.Second
-	defaultUnlockMaxRetryDuration             = 30 * time.Second
-	defaultWaitTime                           = 5 * time.Second
-	defaultMaxCacheTTL                        = 48 * time.Hour
-	defaultMinCacheTTLThreshold               = 5 * time.Second
-	defaultLockTries                          = 1
-	defaultCacheHitThreshold                  = 10
-	defaultMultiplierFactor                   = 2
-	defaultBackoffMinDurationForUnlockAttempt = 10 * time.Millisecond
-	defaultBackoffMaxDurationForUnlockAttempt = 100 * time.Millisecond
-	defaultBackoffMinDurationForLockAttempt   = 20 * time.Millisecond
-	defaultBackoffMaxDurationForLockAttempt   = 200 * time.Millisecond
-	defaultRedisPoolMetricsLoggerInterval     = 10 * time.Second
+	defaultTTL                              = 10 * time.Second
+	defaultNilTTL                           = 5 * time.Minute
+	defaultLockDuration                     = 5 * time.Second
+	defaultWaitTime                         = 5 * time.Second
+	defaultMaxCacheTTL                      = 48 * time.Hour
+	defaultMinCacheTTLThreshold             = 5 * time.Second
+	defaultLockTries                        = 1
+	defaultCacheHitThreshold                = 10
+	defaultMultiplierFactor                 = 2
+	defaultBackoffMinDurationForLockAttempt = 20 * time.Millisecond
+	defaultBackoffMaxDurationForLockAttempt = 200 * time.Millisecond
+	defaultRedisPoolMetricsLoggerInterval   = 10 * time.Second
 )
 
 var nilValue = []byte("null")
