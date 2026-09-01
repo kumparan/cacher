@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -164,6 +163,16 @@ type (
 		waitCount    int64
 		waitDuration time.Duration
 	}
+
+	keyTTL struct {
+		key string
+		ttl int64
+	}
+
+	lockResult struct {
+		mutex *redsync.Mutex
+		err   error
+	}
 )
 
 // Error implements built-in error interface
@@ -269,7 +278,8 @@ func (k *keeper) Get(key string) (cachedItem any, err error) {
 		return
 	}
 
-	cachedItem, ttl, err := get(k.connPool.Get(), key)
+	conn := k.connPool.Get()
+	cachedItem, ttl, err := get(conn, key)
 	switch err {
 	case nil, ErrKeyNotExist, redigo.ErrNil:
 	default:
@@ -310,7 +320,8 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 		}
 
 		if !k.isLocked(key) {
-			cachedItem, ttlValue, err := get(k.connPool.Get(), key)
+			conn := k.connPool.Get()
+			cachedItem, ttlValue, err := get(conn, key)
 			if err != nil {
 				if err == ErrKeyNotExist {
 					mutex, err = k.AcquireLock(key)
@@ -482,57 +493,69 @@ func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []
 
 // GetMultiple returns a map of cached values for the given keys. If a key does not exist in the cache, it will not be included in the returned map. The function also handles dynamic TTL extension if enabled.
 func (k *keeper) GetMultiple(keys []string) (map[string]any, error) {
-	result := make(map[string]any, len(keys))
+	if k.disableCaching || len(keys) == 0 {
+		return map[string]any{}, nil
+	}
 
 	if len(keys) == 0 {
-		return result, nil
+		return nil, nil
 	}
 
-	conn := k.connPool.Get()
-	defer func() {
-		err := conn.Close()
-		if err != nil {
-			logrus.Error(err)
-		}
-	}()
+	uniqueKeys := utils.Unique(keys)
+	result := make(map[string]any, len(uniqueKeys))
+	ttls := make([]keyTTL, 0, len(uniqueKeys))
 
-	for _, key := range keys {
-		if err := conn.Send("GET", key); err != nil {
-			return nil, err
-		}
+	err := func() error {
+		conn := k.connPool.Get()
+		defer func() {
+			if closeErr := conn.Close(); closeErr != nil {
+				logrus.Error(closeErr)
+			}
+		}()
 
-		if k.enableDynamicTTL {
-			if err := conn.Send("TTL", key); err != nil {
-				return nil, err
+		for _, key := range uniqueKeys {
+			if err := conn.Send("GET", key); err != nil {
+				return err
+			}
+			if k.enableDynamicTTL {
+				if err := conn.Send("TTL", key); err != nil {
+					return err
+				}
 			}
 		}
-	}
-
-	if err := conn.Flush(); err != nil {
-		return nil, err
-	}
-
-	for _, key := range keys {
-		value, err := redigo.Bytes(conn.Receive())
-		if err != nil && err != redigo.ErrNil {
-			return nil, err
+		if err := conn.Flush(); err != nil {
+			return err
 		}
 
-		if k.enableDynamicTTL {
-			ttl, err := redigo.Int64(conn.Receive())
-			if err != nil {
-				return nil, err
+		for _, key := range uniqueKeys {
+			value, err := redigo.Bytes(conn.Receive())
+			if err != nil && !errors.Is(err, redigo.ErrNil) {
+				return err
+			}
+
+			if k.enableDynamicTTL {
+				ttl, ttlErr := redigo.Int64(conn.Receive())
+				if ttlErr != nil {
+					return ttlErr
+				}
+				if value != nil {
+					ttls = append(ttls, keyTTL{key: key, ttl: ttl})
+				}
 			}
 
 			if value != nil {
-				k.extendCacheTTL(key, ttl)
+				result[key] = value
 			}
 		}
 
-		if value != nil {
-			result[key] = value
-		}
+		return nil
+	}()
+
+	if err != nil {
+		return nil, err
 	}
+
+	k.extendCacheTTLMultiple(ttls)
 
 	return result, nil
 }
@@ -618,7 +641,10 @@ func GetMultipleOrLoad[T any](
 		}
 
 		// lock what we can; leave the rest to whoever holds the lock
-		mutexes, locked, waiting := acquireLocksConcurrently(k, missing)
+		mutexes, locked, waiting, err := acquireLocksConcurrently(k, missing)
+		if err != nil {
+			logrus.Error("failed to lock one/more keys:", err)
+		}
 		if len(locked) > 0 {
 			loaderCallCount++
 			values, err := loader(ctx, utils.MapValuesToOrderedSlice(identifierByKey, locked))
@@ -661,33 +687,42 @@ func GetMultipleOrLoad[T any](
 	return res, nil
 }
 
-func acquireLocksConcurrently(k Keeper, keysToLock []string) (mutexes []*redsync.Mutex, lockedKeys []string, waitingKeys []string) {
+func acquireLocksConcurrently(k Keeper, keysToLock []string) (mutexes []*redsync.Mutex, lockedKeys []string, waitingKeys []string, err error) {
 	var g errgroup.Group
-	g.SetLimit(concurrencyLimit)
+	g.SetLimit(lockConcurrencyLimit)
 
-	mu := sync.Mutex{}
-	for _, key := range keysToLock {
+	results := make([]lockResult, len(keysToLock))
+	for i, key := range keysToLock {
 		key := key
-
 		g.Go(func() error {
-			mutex, err := k.AcquireLock(key)
-			if err != nil {
-				mu.Lock()
-				waitingKeys = append(waitingKeys, key)
-				mu.Unlock()
-				return err
-			}
-			mu.Lock()
-			mutexes = append(mutexes, mutex)
-			lockedKeys = append(lockedKeys, key)
-			mu.Unlock()
+			mutex, lockErr := k.AcquireLock(key)
+			results[i] = lockResult{mutex: mutex, err: lockErr}
 			return nil
 		})
 	}
 
 	_ = g.Wait()
 
-	return
+	mutexes = make([]*redsync.Mutex, 0, len(keysToLock))
+	lockedKeys = make([]string, 0, len(keysToLock))
+	waitingKeys = make([]string, 0, len(keysToLock))
+
+	var errs *multierror.Error
+	for i, key := range keysToLock {
+		res := results[i]
+		if res.err != nil {
+			if !errors.Is(res.err, redsync.ErrFailed) {
+				errs = multierror.Append(errs, fmt.Errorf("acquire lock for %q: %w", key, res.err))
+			}
+			waitingKeys = append(waitingKeys, key)
+			continue
+		}
+
+		mutexes = append(mutexes, res.mutex)
+		lockedKeys = append(lockedKeys, key)
+	}
+
+	return mutexes, lockedKeys, waitingKeys, errs.ErrorOrNil()
 }
 
 func (k *keeper) acquireLockOrGetValueThroughChan(key string, mutexCh chan<- mutexWithKey, itemCh chan<- itemWithKey, errCh chan<- error) {
@@ -1660,7 +1695,92 @@ func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
 	return int64(k.defaultTTL.Seconds())
 }
 
-// extendCacheTTL will increase cache based on traffic
+// extendCacheTTLMultiple applies the dynamic TTL policy to a whole batch of
+// keys using two pipelined round trips, instead of the two per key that
+// extendCacheTTL costs.
+//
+// Round trip one bumps every hit counter; round trip two extends only the keys
+// whose counter crossed the threshold.
+func (k *keeper) extendCacheTTLMultiple(items []keyTTL) {
+	if len(items) == 0 {
+		return
+	}
+
+	// Filter locally first: keys below the threshold never needed a round trip.
+	minTTL := int64(k.minCacheTTLThreshold.Seconds())
+	candidates := make([]keyTTL, 0, len(items))
+	for _, item := range items {
+		if item.ttl >= minTTL {
+			candidates = append(candidates, item)
+		}
+	}
+	if len(candidates) == 0 {
+		return
+	}
+
+	client := k.connPool.Get()
+	defer func() {
+		_ = client.Close()
+	}()
+
+	for _, item := range candidates {
+		if err := client.Send("INCR", getCounterKey(item.key)); err != nil {
+			logrus.Error(err)
+			return
+		}
+	}
+	if err := client.Flush(); err != nil {
+		logrus.Error(err)
+		return
+	}
+
+	due := make([]keyTTL, 0, len(candidates))
+	for _, item := range candidates {
+		counterValue, err := redigo.Int64(client.Receive())
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+		if counterValue <= 0 || counterValue%k.cacheHitThreshold != 0 {
+			continue
+		}
+		due = append(due, item)
+	}
+	if len(due) == 0 {
+		return
+	}
+
+	for _, item := range due {
+		newTTL := item.ttl * k.multiplierFactor
+		if newTTL > int64(k.maxCacheTTL) {
+			newTTL = int64(k.maxCacheTTL)
+		}
+
+		if err := client.Send("EXPIRE", item.key, newTTL, "GT"); err != nil {
+			logrus.Error(err)
+			return
+		}
+		if err := client.Send("EXPIRE", getCounterKey(item.key), newTTL, "GT"); err != nil {
+			logrus.Error(err)
+			return
+		}
+	}
+	if err := client.Flush(); err != nil {
+		logrus.Error(err)
+		return
+	}
+
+	for range due {
+		for i := 0; i < 2; i++ {
+			if _, err := client.Receive(); err != nil {
+				logrus.Error(err)
+				return
+			}
+		}
+	}
+}
+
+// extendCacheTTL will use passed redis conn to increase cache TTL based on traffic
 // if the traffic reaches the threshold, it will extend the cache TTL
 // will not return error as this should not disturb the main operation
 func (k *keeper) extendCacheTTL(key string, ttl int64) {
@@ -1669,12 +1789,8 @@ func (k *keeper) extendCacheTTL(key string, ttl int64) {
 		return
 	}
 
-	counterKey := getCounterKey(key)
 	client := k.connPool.Get()
-	defer func() {
-		_ = client.Close()
-	}()
-
+	counterKey := getCounterKey(key)
 	res, err := client.Do("INCR", counterKey)
 	if err != nil {
 		logrus.Error(err)

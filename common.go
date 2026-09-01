@@ -17,63 +17,105 @@ import (
 )
 
 const (
-	unlockMaxAttempts = 2
-	unlockTimeout     = 250 * time.Millisecond
-	unlockRetryDelay  = 20 * time.Millisecond
-	concurrencyLimit  = 10
+	unlockMaxAttempts    = 2
+	unlockRetryDelay     = 20 * time.Millisecond
+	lockConcurrencyLimit = 10
+	unlockBudget         = 500 * time.Millisecond
+	unlockAttemptTimeout = 250 * time.Millisecond
 )
 
-// SafeUnlock unlock multiple mutexes concurrently and safely
-// when unlock fails, it means the lock is already expired or not exists anymore
-// when unlock got error, it will retry to unlock again until max attempts reached
+// SafeUnlock releases the given mutexes, concurrently and without ever
+// releasing a lock that now belongs to someone else.
+//
+// It blocks until every mutex is released or unlockBudget elapses, whichever
+// comes first, so callers that immediately retry a key do not race their own
+// pending unlock. Mutexes that have already expired are skipped: the lock is
+// gone either way and the round trip would be wasted.
+//
+// An unlock that reports success == false means the key was already gone. That
+// is a normal outcome and is not retried. Only transport errors are retried.
 func SafeUnlock(mutexes ...*redsync.Mutex) {
-	eg := errgroup.Group{}
-	eg.SetLimit(concurrencyLimit)
-	for _, mutex := range mutexes {
-		if mutex == nil {
+	live := make([]*redsync.Mutex, 0, len(mutexes))
+	now := time.Now()
+	for _, m := range mutexes {
+		if m == nil {
 			continue
 		}
-
-		m := mutex
-		eg.Go(func() error {
-			for attempt := 1; attempt <= unlockMaxAttempts; attempt++ {
-				ctx, cancel := context.WithTimeout(
-					context.Background(),
-					unlockTimeout,
-				)
-
-				unlocked, err := m.UnlockContext(ctx)
-				cancel()
-
-				if err == nil {
-					if !unlocked {
-						logrus.WithFields(logrus.Fields{
-							"mutex":     m.Name(),
-							"remaining": time.Until(m.Until()),
-						}).Warn("mutex unlock didn't succeed")
-					}
-
-					return nil
-				}
-
-				logrus.WithFields(logrus.Fields{
-					"mutex":     m.Name(),
-					"attempt":   attempt,
-					"remaining": time.Until(m.Until()),
-				}).Error("failed to unlock mutex:", err)
-
-				if attempt == unlockMaxAttempts {
-					break
-				}
-
-				time.Sleep(unlockRetryDelay)
-			}
-
-			return nil
-		})
+		// Until() is the zero time if the mutex was never acquired, and in the
+		// past if the lock has already expired. Either way there is nothing of
+		// ours left in redis to delete.
+		if until := m.Until(); until.IsZero() || now.After(until) {
+			logrus.WithField("mutex", m.Name()).Debug("skipping unlock, mutex already expired")
+			continue
+		}
+		live = append(live, m)
 	}
 
-	_ = eg.Wait()
+	if len(live) == 0 {
+		return
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+
+		eg := errgroup.Group{}
+		eg.SetLimit(lockConcurrencyLimit)
+		for _, m := range live {
+			eg.Go(func() error {
+				unlockWithRetry(m)
+				return nil
+			})
+		}
+		_ = eg.Wait()
+	}()
+
+	timer := time.NewTimer(unlockBudget)
+	defer timer.Stop()
+
+	select {
+	case <-done:
+	case <-timer.C:
+		logrus.WithField("mutexes", len(live)).
+			Warn("SafeUnlock exceeded its budget, remaining unlocks continue in the background")
+	}
+}
+
+// unlockWithRetry releases a single mutex, retrying only on transport errors.
+func unlockWithRetry(m *redsync.Mutex) {
+	for attempt := 1; attempt <= unlockMaxAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), unlockAttemptTimeout)
+		unlocked, err := m.UnlockContext(ctx)
+		cancel()
+
+		if err == nil {
+			if !unlocked {
+				logrus.WithFields(logrus.Fields{
+					"mutex":     m.Name(),
+					"remaining": time.Until(m.Until()),
+				}).Warn("mutex unlock didn't succeed, lock was already released or taken over")
+			}
+			return
+		}
+
+		logrus.WithFields(logrus.Fields{
+			"mutex":     m.Name(),
+			"attempt":   attempt,
+			"remaining": time.Until(m.Until()),
+		}).Error("failed to unlock mutex: ", err)
+
+		if attempt == unlockMaxAttempts {
+			return
+		}
+
+		// No point retrying a lock that expired while we were failing to
+		// release it.
+		if time.Now().After(m.Until()) {
+			return
+		}
+
+		time.Sleep(unlockRetryDelay)
+	}
 }
 
 // ParseCacheResultToPointerObject parse cache result to any object you want
