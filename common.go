@@ -20,7 +20,7 @@ const (
 	unlockMaxAttempts    = 2
 	unlockRetryDelay     = 20 * time.Millisecond
 	lockConcurrencyLimit = 10
-	unlockBudget         = 500 * time.Millisecond
+	unlockBudget         = time.Second
 	unlockAttemptTimeout = 250 * time.Millisecond
 )
 

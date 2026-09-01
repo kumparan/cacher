@@ -497,10 +497,6 @@ func (k *keeper) GetMultiple(keys []string) (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 
-	if len(keys) == 0 {
-		return nil, nil
-	}
-
 	uniqueKeys := utils.Unique(keys)
 	result := make(map[string]any, len(uniqueKeys))
 	ttls := make([]keyTTL, 0, len(uniqueKeys))
@@ -643,7 +639,7 @@ func GetMultipleOrLoad[T any](
 		// lock what we can; leave the rest to whoever holds the lock
 		mutexes, locked, waiting, err := acquireLocksConcurrently(k, missing)
 		if err != nil {
-			logrus.Error("failed to lock one/more keys:", err)
+			logrus.WithError(err).Error("failed to lock one/more keys")
 		}
 		if len(locked) > 0 {
 			loaderCallCount++
@@ -1778,7 +1774,7 @@ func (k *keeper) applyDynamicTTLPolicy(items []keyTTL) {
 	}
 }
 
-// extendCacheTTL will use passed redis conn to increase cache TTL based on traffic
+// extendCacheTTL will increase cache TTL based on traffic
 // if the traffic reaches the threshold, it will extend the cache TTL
 // will not return error as this should not disturb the main operation
 func (k *keeper) extendCacheTTL(key string, ttl int64) {
@@ -1788,6 +1784,9 @@ func (k *keeper) extendCacheTTL(key string, ttl int64) {
 	}
 
 	client := k.connPool.Get()
+	defer func() {
+		_ = client.Close()
+	}()
 	counterKey := getCounterKey(key)
 	res, err := client.Do("INCR", counterKey)
 	if err != nil {
@@ -1865,6 +1864,8 @@ func (k *keeper) logPoolMetrics(
 	if exists {
 		waitCountDelta = stats.WaitCount - prev.waitCount
 		waitDurationDelta = stats.WaitDuration - prev.waitDuration
+	}
+	if waitCountDelta > 0 {
 		avgWaitDuration = waitDurationDelta / time.Duration(waitCountDelta)
 	}
 
