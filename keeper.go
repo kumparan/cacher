@@ -568,6 +568,10 @@ func GetMultipleOrLoad[T any](
 	items []KeyIdentifier[T],
 	loader func(ctx context.Context, identifiers []T) (map[string][]byte, error),
 ) ([]any, error) {
+	start := time.Now()
+	defer func() {
+		logrus.WithField("duration", time.Since(start).Milliseconds()).Info("GetMultipleOrLoad completed")
+	}()
 	identifierByKey := make(map[string]T, len(items))
 	pending := make([]string, 0, len(items))
 	for _, it := range items {
@@ -578,6 +582,7 @@ func GetMultipleOrLoad[T any](
 		pending = append(pending, it.Key)
 	}
 
+	logrus.WithFields(logrus.Fields{"duration": time.Since(start).Milliseconds()}).Info("GetMultipleOrLoad: Finish generating identifierByKey and pending")
 	// call the loader directly if caching is disabled
 	if k.IsCachingDisabled() {
 		values, err := loader(ctx, utils.MapValuesToOrderedSlice(identifierByKey, pending))
@@ -602,6 +607,7 @@ func GetMultipleOrLoad[T any](
 		Jitter: true,
 	}
 	loaderCallCount := 0
+	i := 0
 	defer func() {
 		if loaderCallCount > 1 {
 			logrus.Warn("loader called more than once:", loaderCallCount)
@@ -614,7 +620,9 @@ func GetMultipleOrLoad[T any](
 
 		// check/recheck cache
 		missing := make([]string, 0, len(pending))
+		i++
 		cached, err := k.GetMultiple(pending)
+		logrus.WithFields(logrus.Fields{"duration": time.Since(start).Milliseconds()}).Info("GetMultipleOrLoad: Finish GetMultiple iteration:", i)
 		if err != nil {
 			logrus.Error(err)
 			return nil, err
@@ -635,12 +643,14 @@ func GetMultipleOrLoad[T any](
 
 		// lock what we can; leave the rest to whoever holds the lock
 		mutexes, locked, waiting, err := acquireLocksConcurrently(k, missing)
+		logrus.WithFields(logrus.Fields{"duration": time.Since(start).Milliseconds()}).Info("GetMultipleOrLoad: Finish acquireLocksConcurrently iteration:", i)
 		if err != nil {
 			logrus.WithError(err).Error("failed to lock one/more keys")
 		}
 		if len(locked) > 0 {
 			loaderCallCount++
 			values, err := loader(ctx, utils.MapValuesToOrderedSlice(identifierByKey, locked))
+			logrus.WithFields(logrus.Fields{"duration": time.Since(start).Milliseconds()}).Info("GetMultipleOrLoad: Finish loader call iteration:", i)
 			if err != nil {
 				SafeUnlock(mutexes...)
 				return nil, err
@@ -658,7 +668,9 @@ func GetMultipleOrLoad[T any](
 			if err := k.StoreMultiWithoutBlocking(cacheItems); err != nil {
 				logrus.Error(err)
 			}
+			logrus.WithFields(logrus.Fields{"duration": time.Since(start).Milliseconds()}).Info("GetMultipleOrLoad: Finish StoreMultiWithoutBlocking iteration:", i)
 			SafeUnlock(mutexes...)
+			logrus.WithFields(logrus.Fields{"duration": time.Since(start).Milliseconds()}).Info("GetMultipleOrLoad: Finish SafeUnlock iteration:", i)
 		}
 
 		pending = waiting
@@ -670,6 +682,7 @@ func GetMultipleOrLoad[T any](
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-time.After(bo.Duration()):
+			logrus.WithFields(logrus.Fields{"duration": time.Since(start).Milliseconds()}).Info("GetMultipleOrLoad: Finish backoff sleep iteration:", i)
 		}
 	}
 
