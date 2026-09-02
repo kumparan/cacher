@@ -677,11 +677,12 @@ func GetMultipleOrLoad[T any](
 		if len(pending) == 0 {
 			break
 		}
-
+		backoffDuration := bo.Duration()
+		fmt.Println("GetMultipleOrLoad: Backoff sleep for", backoffDuration, "iteration:", i)
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(bo.Duration()):
+		case <-time.After(backoffDuration):
 			logrus.WithFields(logrus.Fields{"duration": time.Since(start).Milliseconds()}).Info("GetMultipleOrLoad: Finish backoff sleep iteration:", i)
 		}
 	}
