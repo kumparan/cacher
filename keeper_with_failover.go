@@ -121,7 +121,8 @@ func (k *KeeperWithFailover) GetFailover(key string) (cachedItem any, err error)
 		return
 	}
 
-	cachedItem, ttl, err := get(k.failoverConnPool.Get(), key)
+	conn := k.failoverConnPool.Get()
+	cachedItem, ttl, err := get(conn, key)
 	switch err {
 	case nil, ErrKeyNotExist, redigo.ErrNil:
 	default:

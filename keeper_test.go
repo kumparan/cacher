@@ -1503,7 +1503,7 @@ func TestGetMultipleOrLoad(t *testing.T) {
 
 		require.NoError(t, err)
 
-		assert.Equal(t, []int64{1, 2}, loadedIdentifiers)
+		assert.ElementsMatch(t, []int64{1, 2}, loadedIdentifiers)
 		assert.Equal(t, []any{
 			[]byte(`{"id":1}`),
 			[]byte(`{"id":2}`),
@@ -1557,7 +1557,7 @@ func TestGetMultipleOrLoad(t *testing.T) {
 
 		require.NoError(t, err)
 
-		assert.Equal(t, []int64{2, 3}, loadedIdentifiers)
+		assert.ElementsMatch(t, []int64{2, 3}, loadedIdentifiers)
 
 		assert.Equal(t, []any{
 			[]byte(`{"id":1}`),
@@ -1597,7 +1597,7 @@ func TestGetMultipleOrLoad(t *testing.T) {
 		)
 
 		require.NoError(t, err)
-		assert.Equal(t, []string{"abc", "def"}, loadedIdentifiers)
+		assert.ElementsMatch(t, []string{"abc", "def"}, loadedIdentifiers)
 
 		assert.Equal(t, []any{
 			[]byte(`{"id":"abc"}`),

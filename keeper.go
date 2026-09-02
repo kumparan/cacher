@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/hashicorp/go-multierror"
 
 	"github.com/sirupsen/logrus"
@@ -20,20 +22,18 @@ import (
 
 const (
 	// Override these when constructing the cache keeper
-	defaultTTL                                = 10 * time.Second
-	defaultNilTTL                             = 5 * time.Minute
-	defaultLockDuration                       = 5 * time.Second
-	defaultUnlockMaxRetryDuration             = 30 * time.Second
-	defaultWaitTime                           = 5 * time.Second
-	defaultMaxCacheTTL                        = 48 * time.Hour
-	defaultMinCacheTTLThreshold               = 5 * time.Second
-	defaultLockTries                          = 1
-	defaultCacheHitThreshold                  = 10
-	defaultMultiplierFactor                   = 2
-	defaultBackoffMinDurationForUnlockAttempt = 10 * time.Millisecond
-	defaultBackoffMaxDurationForUnlockAttempt = 100 * time.Millisecond
-	defaultBackoffMinDurationForLockAttempt   = 20 * time.Millisecond
-	defaultBackoffMaxDurationForLockAttempt   = 200 * time.Millisecond
+	defaultTTL                              = 10 * time.Second
+	defaultNilTTL                           = 5 * time.Minute
+	defaultLockDuration                     = 5 * time.Second
+	defaultWaitTime                         = 5 * time.Second
+	defaultMaxCacheTTL                      = 48 * time.Hour
+	defaultMinCacheTTLThreshold             = 5 * time.Second
+	defaultLockTries                        = 1
+	defaultCacheHitThreshold                = 10
+	defaultMultiplierFactor                 = 2
+	defaultBackoffMinDurationForLockAttempt = 20 * time.Millisecond
+	defaultBackoffMaxDurationForLockAttempt = 200 * time.Millisecond
+	defaultRedisPoolMetricsLoggerInterval   = 10 * time.Second
 )
 
 var nilValue = []byte("null")
@@ -47,6 +47,7 @@ type (
 		Get(key string) (any, error)
 		GetOrLock(key string) (any, *redsync.Mutex, error)
 		GetOrSet(key string, fn GetterFn, opts ...func(Item)) ([]byte, error)
+		GetMultiple(keys []string) (map[string]any, error)
 		GetMultipleOrLock(keys []string) ([]any, []*redsync.Mutex, error)
 		Store(*redsync.Mutex, Item) error
 		StoreWithoutBlocking(Item) error
@@ -101,6 +102,8 @@ type (
 		IncreaseHashMemberValue(identifier, key string, value int64) (int64, error)
 		GetHashMemberThenDelete(identifier, key string) (any, error)
 		HashScan(identifier string, cursor int64) (next int64, result map[string]string, err error)
+
+		StartPoolMetricsLogger(ctx context.Context, interval time.Duration)
 	}
 
 	keeper struct {
@@ -151,6 +154,21 @@ type (
 	KeyIdentifier[T any] struct {
 		Key        string
 		Identifier T
+	}
+
+	redisPoolSnapshot struct {
+		waitCount    int64
+		waitDuration time.Duration
+	}
+
+	keyTTL struct {
+		key string
+		ttl int64
+	}
+
+	lockResult struct {
+		mutex *redsync.Mutex
+		err   error
 	}
 )
 
@@ -257,7 +275,8 @@ func (k *keeper) Get(key string) (cachedItem any, err error) {
 		return
 	}
 
-	cachedItem, ttl, err := get(k.connPool.Get(), key)
+	conn := k.connPool.Get()
+	cachedItem, ttl, err := get(conn, key)
 	switch err {
 	case nil, ErrKeyNotExist, redigo.ErrNil:
 	default:
@@ -298,7 +317,8 @@ func (k *keeper) GetOrLock(key string) (cachedItem any, mutex *redsync.Mutex, er
 		}
 
 		if !k.isLocked(key) {
-			cachedItem, ttlValue, err := get(k.connPool.Get(), key)
+			conn := k.connPool.Get()
+			cachedItem, ttlValue, err := get(conn, key)
 			if err != nil {
 				if err == ErrKeyNotExist {
 					mutex, err = k.AcquireLock(key)
@@ -468,6 +488,71 @@ func (k *keeper) GetMultipleOrLock(keys []string) (cachedItems []any, mutexes []
 	return
 }
 
+// GetMultiple returns a map of cached values for the given keys. If a key does not exist in the cache, it will not be included in the returned map. The function also handles dynamic TTL extension if enabled.
+func (k *keeper) GetMultiple(keys []string) (map[string]any, error) {
+	if k.disableCaching || len(keys) == 0 {
+		return map[string]any{}, nil
+	}
+
+	uniqueKeys := utils.Unique(keys)
+	result := make(map[string]any, len(uniqueKeys))
+	ttls := make([]keyTTL, 0, len(uniqueKeys))
+
+	err := func() error {
+		conn := k.connPool.Get()
+		defer func() {
+			if closeErr := conn.Close(); closeErr != nil {
+				logrus.Error(closeErr)
+			}
+		}()
+
+		for _, key := range uniqueKeys {
+			if err := conn.Send("GET", key); err != nil {
+				return err
+			}
+			if k.enableDynamicTTL {
+				if err := conn.Send("TTL", key); err != nil {
+					return err
+				}
+			}
+		}
+		if err := conn.Flush(); err != nil {
+			return err
+		}
+
+		for _, key := range uniqueKeys {
+			value, err := redigo.Bytes(conn.Receive())
+			if err != nil && !errors.Is(err, redigo.ErrNil) {
+				return err
+			}
+
+			if k.enableDynamicTTL {
+				ttl, ttlErr := redigo.Int64(conn.Receive())
+				if ttlErr != nil {
+					return ttlErr
+				}
+				if value != nil {
+					ttls = append(ttls, keyTTL{key: key, ttl: ttl})
+				}
+			}
+
+			if value != nil {
+				result[key] = value
+			}
+		}
+
+		return nil
+	}()
+
+	if err != nil {
+		return nil, err
+	}
+
+	k.applyDynamicTTLPolicy(ttls)
+
+	return result, nil
+}
+
 // GetMultipleOrLoad returns the cached value for every item, in the same order as items.
 // Keys that miss are locked and loaded via loader; if another process already holds the
 // lock, this waits for that process to fill the cache instead of loading twice.
@@ -529,37 +614,30 @@ func GetMultipleOrLoad[T any](
 
 		// check/recheck cache
 		missing := make([]string, 0, len(pending))
+		cached, err := k.GetMultiple(pending)
+		if err != nil {
+			logrus.Error(err)
+			return nil, err
+		}
+
 		for _, key := range pending {
-			v, err := k.Get(key)
-			if err != nil {
-				logrus.Error(err)
-				return nil, err
-			}
-			if v != nil {
-				result[key] = v
+			if value, exists := cached[key]; exists {
+				result[key] = value
 				continue
 			}
+
 			missing = append(missing, key)
 		}
+
 		if len(missing) == 0 {
 			break
 		}
 
 		// lock what we can; leave the rest to whoever holds the lock
-		locked := make([]string, 0, len(missing))
-		mutexes := make([]*redsync.Mutex, 0, len(missing))
-		waiting := make([]string, 0, len(missing))
-
-		for _, key := range missing {
-			mu, err := k.AcquireLock(key)
-			if err != nil {
-				waiting = append(waiting, key)
-				continue
-			}
-			locked = append(locked, key)
-			mutexes = append(mutexes, mu)
+		mutexes, locked, waiting, err := acquireLocksConcurrently(k, missing)
+		if err != nil {
+			logrus.WithError(err).Error("failed to lock one/more keys")
 		}
-
 		if len(locked) > 0 {
 			loaderCallCount++
 			values, err := loader(ctx, utils.MapValuesToOrderedSlice(identifierByKey, locked))
@@ -600,6 +678,44 @@ func GetMultipleOrLoad[T any](
 		res[i] = result[it.Key]
 	}
 	return res, nil
+}
+
+func acquireLocksConcurrently(k Keeper, keysToLock []string) (mutexes []*redsync.Mutex, lockedKeys []string, waitingKeys []string, err error) {
+	var g errgroup.Group
+	g.SetLimit(lockConcurrencyLimit)
+
+	results := make([]lockResult, len(keysToLock))
+	for i, key := range keysToLock {
+		key := key
+		g.Go(func() error {
+			mutex, lockErr := k.AcquireLock(key)
+			results[i] = lockResult{mutex: mutex, err: lockErr}
+			return nil
+		})
+	}
+
+	_ = g.Wait()
+
+	mutexes = make([]*redsync.Mutex, 0, len(keysToLock))
+	lockedKeys = make([]string, 0, len(keysToLock))
+	waitingKeys = make([]string, 0, len(keysToLock))
+
+	var errs *multierror.Error
+	for i, key := range keysToLock {
+		res := results[i]
+		if res.err != nil {
+			if !errors.Is(res.err, redsync.ErrFailed) {
+				errs = multierror.Append(errs, fmt.Errorf("acquire lock for %q: %w", key, res.err))
+			}
+			waitingKeys = append(waitingKeys, key)
+			continue
+		}
+
+		mutexes = append(mutexes, res.mutex)
+		lockedKeys = append(lockedKeys, key)
+	}
+
+	return mutexes, lockedKeys, waitingKeys, errs.ErrorOrNil()
 }
 
 func (k *keeper) acquireLockOrGetValueThroughChan(key string, mutexCh chan<- mutexWithKey, itemCh chan<- itemWithKey, errCh chan<- error) {
@@ -1536,6 +1652,34 @@ func (k *keeper) HashScan(identifier string, cursor int64) (next int64, result m
 	return
 }
 
+// StartPoolMetricsLogger starts a goroutine that logs the connection pool metrics at the specified interval.
+func (k *keeper) StartPoolMetricsLogger(
+	ctx context.Context,
+	interval time.Duration,
+) {
+	if interval <= 0 {
+		interval = defaultRedisPoolMetricsLoggerInterval
+	}
+
+	previous := make(map[string]redisPoolSnapshot)
+
+	ticker := time.NewTicker(interval)
+
+	go func() {
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				k.logPoolMetrics("cache", k.connPool, previous)
+				k.logPoolMetrics("lock", k.lockConnPool, previous)
+			}
+		}
+	}()
+}
+
 func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
 	if ttl = c.GetTTLInt64(); ttl > 0 {
 		return
@@ -1544,7 +1688,90 @@ func (k *keeper) decideCacheTTL(c Item) (ttl int64) {
 	return int64(k.defaultTTL.Seconds())
 }
 
-// extendCacheTTL will increase cache based on traffic
+// applyDynamicTTLPolicy applies the dynamic TTL policy to a whole batch of
+// keys using two pipelined round trips
+// Round trip one bumps every hit counter; round trip two extends only the keys
+// whose counter crossed the threshold.
+func (k *keeper) applyDynamicTTLPolicy(items []keyTTL) {
+	if len(items) == 0 || !k.enableDynamicTTL {
+		return
+	}
+
+	// Filter locally first: keys below the threshold never needed a round trip.
+	minTTL := int64(k.minCacheTTLThreshold.Seconds())
+	candidates := make([]keyTTL, 0, len(items))
+	for _, item := range items {
+		if item.ttl >= minTTL {
+			candidates = append(candidates, item)
+		}
+	}
+	if len(candidates) == 0 {
+		return
+	}
+
+	client := k.connPool.Get()
+	defer func() {
+		_ = client.Close()
+	}()
+
+	for _, item := range candidates {
+		if err := client.Send("INCR", getCounterKey(item.key)); err != nil {
+			logrus.Error(err)
+			return
+		}
+	}
+	if err := client.Flush(); err != nil {
+		logrus.Error(err)
+		return
+	}
+
+	due := make([]keyTTL, 0, len(candidates))
+	for _, item := range candidates {
+		counterValue, err := redigo.Int64(client.Receive())
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+		if counterValue <= 0 || counterValue%k.cacheHitThreshold != 0 {
+			continue
+		}
+		due = append(due, item)
+	}
+	if len(due) == 0 {
+		return
+	}
+
+	for _, item := range due {
+		newTTL := item.ttl * k.multiplierFactor
+		if newTTL > int64(k.maxCacheTTL) {
+			newTTL = int64(k.maxCacheTTL)
+		}
+
+		if err := client.Send("EXPIRE", item.key, newTTL, "GT"); err != nil {
+			logrus.Error(err)
+			return
+		}
+		if err := client.Send("EXPIRE", getCounterKey(item.key), newTTL, "GT"); err != nil {
+			logrus.Error(err)
+			return
+		}
+	}
+	if err := client.Flush(); err != nil {
+		logrus.Error(err)
+		return
+	}
+
+	for range due {
+		for i := 0; i < 2; i++ {
+			if _, err := client.Receive(); err != nil {
+				logrus.Error(err)
+				return
+			}
+		}
+	}
+}
+
+// extendCacheTTL will increase cache TTL based on traffic
 // if the traffic reaches the threshold, it will extend the cache TTL
 // will not return error as this should not disturb the main operation
 func (k *keeper) extendCacheTTL(key string, ttl int64) {
@@ -1553,12 +1780,11 @@ func (k *keeper) extendCacheTTL(key string, ttl int64) {
 		return
 	}
 
-	counterKey := getCounterKey(key)
 	client := k.connPool.Get()
 	defer func() {
 		_ = client.Close()
 	}()
-
+	counterKey := getCounterKey(key)
 	res, err := client.Do("INCR", counterKey)
 	if err != nil {
 		logrus.Error(err)
@@ -1613,6 +1839,47 @@ func (k *keeper) isLocked(key string) bool {
 	}
 
 	return true
+}
+
+func (k *keeper) logPoolMetrics(
+	poolName string,
+	pool *redigo.Pool,
+	previous map[string]redisPoolSnapshot,
+) {
+	if pool == nil {
+		return
+	}
+
+	stats := pool.Stats()
+
+	prev, exists := previous[poolName]
+
+	waitCountDelta := int64(0)
+	waitDurationDelta := time.Duration(0)
+	avgWaitDuration := time.Duration(0)
+
+	if exists {
+		waitCountDelta = stats.WaitCount - prev.waitCount
+		waitDurationDelta = stats.WaitDuration - prev.waitDuration
+	}
+	if waitCountDelta > 0 {
+		avgWaitDuration = waitDurationDelta / time.Duration(waitCountDelta)
+	}
+
+	previous[poolName] = redisPoolSnapshot{
+		waitCount:    stats.WaitCount,
+		waitDuration: stats.WaitDuration,
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"pool":                   poolName,
+		"active_count":           stats.ActiveCount,
+		"idle_count":             stats.IdleCount,
+		"in_use":                 stats.ActiveCount - stats.IdleCount,
+		"wait_count_delta":       waitCountDelta,
+		"wait_duration_delta_ms": waitDurationDelta.Milliseconds(),
+		"avg_wait_duration_ms":   avgWaitDuration.Milliseconds(),
+	}).Info("redis connection pool stats")
 }
 
 func sendMultipleGetCommands(c redigo.Conn, keys []string) (err error) {
