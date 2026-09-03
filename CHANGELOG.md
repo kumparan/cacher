@@ -1,9 +1,21 @@
 # cacher
 
+<a name="v1.25.0"></a>
+## [v1.25.0] - 2026-09-03
+### Other Improvements
+- add configurable backoff as option on GetMultipleOrLoad
+
+
+<a name="v1.24.0"></a>
+## [v1.24.0] - 2026-09-02
+### Other Improvements
+- use pipelining & concurrent lock acquiring on GetMultipleOrLoad ([#66](https://github.com/kumparan/cacher/issues/66))
+
+
 <a name="v1.23.0"></a>
 ## [v1.23.0] - 2026-08-26
 ### Fixes
-- handle disabledCache true in GetMultipleOrLoad
+- handle disabledCache true in GetMultipleOrLoad ([#65](https://github.com/kumparan/cacher/issues/65))
 
 
 <a name="v1.22.0"></a>
@@ -693,7 +705,9 @@
 <a name="v1.0.0"></a>
 ## v1.0.0 - 2019-04-01
 
-[Unreleased]: https://github.com/kumparan/cacher/compare/v1.23.0...HEAD
+[Unreleased]: https://github.com/kumparan/cacher/compare/v1.25.0...HEAD
+[v1.25.0]: https://github.com/kumparan/cacher/compare/v1.24.0...v1.25.0
+[v1.24.0]: https://github.com/kumparan/cacher/compare/v1.23.0...v1.24.0
 [v1.23.0]: https://github.com/kumparan/cacher/compare/v1.22.0...v1.23.0
 [v1.22.0]: https://github.com/kumparan/cacher/compare/v1.21.0...v1.22.0
 [v1.21.0]: https://github.com/kumparan/cacher/compare/v2.8.2...v1.21.0
