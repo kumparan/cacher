@@ -33,6 +33,9 @@ const (
 	defaultMultiplierFactor                 = 2
 	defaultBackoffMinDurationForLockAttempt = 20 * time.Millisecond
 	defaultBackoffMaxDurationForLockAttempt = 200 * time.Millisecond
+	defaultBackoffMinDurationForCacheWait   = 20 * time.Millisecond
+	defaultBackoffMaxDurationForCacheWait   = 40 * time.Millisecond
+	defaultBackoffFactorForCacheWait        = 2.0
 	defaultBackoffFactorForLockAttempt      = 2.0
 	defaultRedisPoolMetricsLoggerInterval   = 10 * time.Second
 )
@@ -595,9 +598,9 @@ func GetMultipleOrLoad[T any](
 ) ([]any, error) {
 	opts := getMultipleOrLoadOptions{
 		backoff: BackoffConfig{
-			Min:    defaultBackoffMinDurationForLockAttempt,
-			Max:    defaultBackoffMaxDurationForLockAttempt,
-			Factor: defaultBackoffFactorForLockAttempt,
+			Min:    defaultBackoffMinDurationForCacheWait,
+			Max:    defaultBackoffMaxDurationForCacheWait,
+			Factor: defaultBackoffFactorForCacheWait,
 			Jitter: true,
 		},
 	}
