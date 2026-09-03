@@ -33,6 +33,10 @@ const (
 	defaultMultiplierFactor                 = 2
 	defaultBackoffMinDurationForLockAttempt = 20 * time.Millisecond
 	defaultBackoffMaxDurationForLockAttempt = 200 * time.Millisecond
+	defaultBackoffMinDurationForCacheWait   = 20 * time.Millisecond
+	defaultBackoffMaxDurationForCacheWait   = 40 * time.Millisecond
+	defaultBackoffFactorForCacheWait        = 2.0
+	defaultBackoffFactorForLockAttempt      = 2.0
 	defaultRedisPoolMetricsLoggerInterval   = 10 * time.Second
 )
 
@@ -170,7 +174,30 @@ type (
 		mutex *redsync.Mutex
 		err   error
 	}
+
+	// BackoffConfig defines the configuration for exponential backoff when acquiring locks or waiting for cache values to be populated.
+	BackoffConfig struct {
+		Min    time.Duration
+		Max    time.Duration
+		Factor float64
+		Jitter bool
+	}
+
+	// GetMultipleOrLoadOption defines a function type for configuring options when calling GetMultipleOrLoad.
+	GetMultipleOrLoadOption func(*getMultipleOrLoadOptions)
+
+	getMultipleOrLoadOptions struct {
+		backoff BackoffConfig
+	}
 )
+
+// WithBackoffConfig allows you to specify a custom backoff configuration for the GetMultipleOrLoad function.
+// This can be useful to adjust the retry behavior when waiting for locks or cache values to be populated.
+func WithBackoffConfig(cfg BackoffConfig) GetMultipleOrLoadOption {
+	return func(opts *getMultipleOrLoadOptions) {
+		opts.backoff = cfg
+	}
+}
 
 // Error implements built-in error interface
 func (ewk *errorWithKey) Error() string {
@@ -567,7 +594,20 @@ func GetMultipleOrLoad[T any](
 	k Keeper,
 	items []KeyIdentifier[T],
 	loader func(ctx context.Context, identifiers []T) (map[string][]byte, error),
+	options ...GetMultipleOrLoadOption,
 ) ([]any, error) {
+	opts := getMultipleOrLoadOptions{
+		backoff: BackoffConfig{
+			Min:    defaultBackoffMinDurationForCacheWait,
+			Max:    defaultBackoffMaxDurationForCacheWait,
+			Factor: defaultBackoffFactorForCacheWait,
+			Jitter: true,
+		},
+	}
+
+	for _, option := range options {
+		option(&opts)
+	}
 	identifierByKey := make(map[string]T, len(items))
 	pending := make([]string, 0, len(items))
 	for _, it := range items {
@@ -597,9 +637,10 @@ func GetMultipleOrLoad[T any](
 
 	result := make(map[string]any, len(pending))
 	bo := &backoff.Backoff{
-		Min:    defaultBackoffMinDurationForLockAttempt,
-		Max:    defaultBackoffMaxDurationForLockAttempt,
-		Jitter: true,
+		Min:    opts.backoff.Min,
+		Max:    opts.backoff.Max,
+		Factor: opts.backoff.Factor,
+		Jitter: opts.backoff.Jitter,
 	}
 	loaderCallCount := 0
 	defer func() {
