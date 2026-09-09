@@ -1,9 +1,15 @@
 # cacher
 
+<a name="v1.26.0"></a>
+## [v1.26.0] - 2026-09-09
+### Other Improvements
+- configurable lock concurrency limit
+
+
 <a name="v1.25.0"></a>
 ## [v1.25.0] - 2026-09-03
 ### Other Improvements
-- add configurable backoff as option on GetMultipleOrLoad
+- add configurable backoff as option on GetMultipleOrLoad ([#67](https://github.com/kumparan/cacher/issues/67))
 
 
 <a name="v1.24.0"></a>
@@ -705,7 +711,8 @@
 <a name="v1.0.0"></a>
 ## v1.0.0 - 2019-04-01
 
-[Unreleased]: https://github.com/kumparan/cacher/compare/v1.25.0...HEAD
+[Unreleased]: https://github.com/kumparan/cacher/compare/v1.26.0...HEAD
+[v1.26.0]: https://github.com/kumparan/cacher/compare/v1.25.0...v1.26.0
 [v1.25.0]: https://github.com/kumparan/cacher/compare/v1.24.0...v1.25.0
 [v1.24.0]: https://github.com/kumparan/cacher/compare/v1.23.0...v1.24.0
 [v1.23.0]: https://github.com/kumparan/cacher/compare/v1.22.0...v1.23.0

@@ -187,7 +187,8 @@ type (
 	GetMultipleOrLoadOption func(*getMultipleOrLoadOptions)
 
 	getMultipleOrLoadOptions struct {
-		backoff BackoffConfig
+		backoff              BackoffConfig
+		lockConcurrencyLimit int
 	}
 )
 
@@ -196,6 +197,13 @@ type (
 func WithBackoffConfig(cfg BackoffConfig) GetMultipleOrLoadOption {
 	return func(opts *getMultipleOrLoadOptions) {
 		opts.backoff = cfg
+	}
+}
+
+// WithConcurrencyLimit allows you to specify a custom concurrency limit for locking related operations
+func WithConcurrencyLimit(limit int) GetMultipleOrLoadOption {
+	return func(opts *getMultipleOrLoadOptions) {
+		opts.lockConcurrencyLimit = limit
 	}
 }
 
@@ -603,6 +611,7 @@ func GetMultipleOrLoad[T any](
 			Factor: defaultBackoffFactorForCacheWait,
 			Jitter: true,
 		},
+		lockConcurrencyLimit: lockConcurrencyLimit,
 	}
 
 	for _, option := range options {
@@ -675,7 +684,7 @@ func GetMultipleOrLoad[T any](
 		}
 
 		// lock what we can; leave the rest to whoever holds the lock
-		mutexes, locked, waiting, err := acquireLocksConcurrently(k, missing)
+		mutexes, locked, waiting, err := acquireLocksConcurrently(k, opts.lockConcurrencyLimit, missing)
 		if err != nil {
 			logrus.WithError(err).Error("failed to lock one/more keys")
 		}
@@ -683,7 +692,7 @@ func GetMultipleOrLoad[T any](
 			loaderCallCount++
 			values, err := loader(ctx, utils.MapValuesToOrderedSlice(identifierByKey, locked))
 			if err != nil {
-				SafeUnlock(mutexes...)
+				SafeUnlockWithConcurrencyLimit(opts.lockConcurrencyLimit, mutexes...)
 				return nil, err
 			}
 
@@ -699,7 +708,7 @@ func GetMultipleOrLoad[T any](
 			if err := k.StoreMultiWithoutBlocking(cacheItems); err != nil {
 				logrus.Error(err)
 			}
-			SafeUnlock(mutexes...)
+			SafeUnlockWithConcurrencyLimit(opts.lockConcurrencyLimit, mutexes...)
 		}
 
 		pending = waiting
@@ -721,9 +730,9 @@ func GetMultipleOrLoad[T any](
 	return res, nil
 }
 
-func acquireLocksConcurrently(k Keeper, keysToLock []string) (mutexes []*redsync.Mutex, lockedKeys []string, waitingKeys []string, err error) {
+func acquireLocksConcurrently(k Keeper, concurrencyLimit int, keysToLock []string) (mutexes []*redsync.Mutex, lockedKeys []string, waitingKeys []string, err error) {
 	var g errgroup.Group
-	g.SetLimit(lockConcurrencyLimit)
+	g.SetLimit(concurrencyLimit)
 
 	results := make([]lockResult, len(keysToLock))
 	for i, key := range keysToLock {

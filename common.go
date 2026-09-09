@@ -19,7 +19,7 @@ import (
 const (
 	unlockMaxAttempts    = 2
 	unlockRetryDelay     = 20 * time.Millisecond
-	lockConcurrencyLimit = 10
+	lockConcurrencyLimit = 25
 	unlockBudget         = time.Second
 	unlockAttemptTimeout = 250 * time.Millisecond
 )
@@ -35,6 +35,11 @@ const (
 // An unlock that reports success == false means the key was already gone. That
 // is a normal outcome and is not retried. Only transport errors are retried.
 func SafeUnlock(mutexes ...*redsync.Mutex) {
+	SafeUnlockWithConcurrencyLimit(lockConcurrencyLimit, mutexes...)
+}
+
+// SafeUnlockWithConcurrencyLimit safe unlock with concurrency limit
+func SafeUnlockWithConcurrencyLimit(limit int, mutexes ...*redsync.Mutex) {
 	live := make([]*redsync.Mutex, 0, len(mutexes))
 	now := time.Now()
 	for _, m := range mutexes {
@@ -60,7 +65,7 @@ func SafeUnlock(mutexes ...*redsync.Mutex) {
 		defer close(done)
 
 		eg := errgroup.Group{}
-		eg.SetLimit(lockConcurrencyLimit)
+		eg.SetLimit(limit)
 		for _, m := range live {
 			eg.Go(func() error {
 				unlockWithRetry(m)
